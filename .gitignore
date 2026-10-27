@@ -1,0 +1,30 @@
+# Binaries and object files
+*.o
+*.obj
+fleet
+fleet.exe
+test_runner
+test_runner.exe
+
+# Database files
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Backups
+backups/*.db
+
+# Generated reports
+reports/*.csv
+reports/*.pdf
+
+# IDE and editor artifacts
+.vscode/
+.idea/
+*.swp
+*.patch
