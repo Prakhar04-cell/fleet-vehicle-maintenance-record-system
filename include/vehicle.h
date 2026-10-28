@@ -53,6 +53,7 @@ StatusCode vehicle_assign_driver(int vehicle_id, int driver_id, int user_id);
 StatusCode vehicle_unassign_driver(int vehicle_id, int user_id);
 StatusCode vehicle_archive(int vehicle_id, int user_id);
 StatusCode vehicle_restore(int vehicle_id, int user_id);
+StatusCode vehicle_delete(int vehicle_id, int user_id);
 
 StatusCode vehicle_list(const VehicleFilterOptions *options, Vehicle **out_vehicles, int *out_count);
 StatusCode vehicle_search(const char *query, Vehicle **out_vehicles, int *out_count);

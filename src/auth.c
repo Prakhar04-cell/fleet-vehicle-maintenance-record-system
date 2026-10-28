@@ -32,13 +32,19 @@ bool auth_has_permission(UserRole role, int permission_flag) {
     switch (role) {
         case ROLE_ADMIN:
             return true; /* Admin has all permissions */
-        case ROLE_MANAGER:
-            return (permission_flag & (PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE | 
-                                      PERM_VEHICLE_WRITE | PERM_EXPENSE_WRITE | PERM_REPORTS)) != 0;
-        case ROLE_STAFF:
-            return (permission_flag & (PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE)) != 0;
-        case ROLE_VIEWER:
-            return (permission_flag & PERM_READ) != 0;
+        case ROLE_MANAGER: {
+            int manager_perms = PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE | 
+                               PERM_VEHICLE_WRITE | PERM_DRIVER_WRITE | PERM_EXPENSE_WRITE | PERM_REPORTS;
+            return (permission_flag & manager_perms) == permission_flag;
+        }
+        case ROLE_STAFF: {
+            int staff_perms = PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE;
+            return (permission_flag & staff_perms) == permission_flag;
+        }
+        case ROLE_VIEWER: {
+            int viewer_perms = PERM_READ;
+            return (permission_flag & viewer_perms) == permission_flag;
+        }
         default:
             return false;
     }
@@ -411,6 +417,59 @@ StatusCode auth_list_users(void) {
     return STATUS_OK;
 }
 
+StatusCode auth_get_users(User **out_users, int *out_count) {
+    if (!out_users || !out_count) return STATUS_INVALID_INPUT;
+    *out_users = NULL;
+    *out_count = 0;
+
+    sqlite3 *db = db_get_handle();
+    if (!db) return STATUS_DB_ERROR;
+
+    const char *sql = "SELECT id, username, role, active, created_at, updated_at FROM users ORDER BY id ASC;";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return STATUS_DB_ERROR;
+
+    int capacity = 8;
+    int count = 0;
+    User *list = (User *)malloc(capacity * sizeof(User));
+    if (!list) {
+        sqlite3_finalize(stmt);
+        return STATUS_ERROR;
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (count >= capacity) {
+            capacity *= 2;
+            User *tmp = (User *)realloc(list, capacity * sizeof(User));
+            if (!tmp) {
+                free(list);
+                sqlite3_finalize(stmt);
+                return STATUS_ERROR;
+            }
+            list = tmp;
+        }
+
+        memset(&list[count], 0, sizeof(User));
+        list[count].id = sqlite3_column_int(stmt, 0);
+        safe_strncpy(list[count].username, (const char *)sqlite3_column_text(stmt, 1), sizeof(list[count].username));
+        const char *role_str = (const char *)sqlite3_column_text(stmt, 2);
+        list[count].role = auth_string_to_role(role_str);
+        list[count].active = (sqlite3_column_int(stmt, 3) != 0);
+        safe_strncpy(list[count].created_at, (const char *)sqlite3_column_text(stmt, 4), sizeof(list[count].created_at));
+        safe_strncpy(list[count].updated_at, (const char *)sqlite3_column_text(stmt, 5), sizeof(list[count].updated_at));
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    *out_users = list;
+    *out_count = count;
+    return STATUS_OK;
+}
+
+void auth_free_users(User *users) {
+    if (users) free(users);
+}
+
 void auth_set_session_user(const User *user) {
     if (user) {
         g_session_user = *user;
@@ -435,4 +494,133 @@ void auth_logout(void) {
 
 bool auth_is_logged_in(void) {
     return g_is_logged_in;
+}
+
+/* ==================== HTTP CRYPTOGRAPHIC SESSION MANAGEMENT ==================== */
+#define MAX_ACTIVE_SESSIONS 64
+#define SESSION_TTL_SECONDS (24 * 3600) /* 24 hours */
+
+typedef struct {
+    char token[AUTH_SESSION_TOKEN_LEN];
+    User user;
+    time_t created_at;
+    time_t last_active_at;
+    bool valid;
+} SessionEntry;
+
+static SessionEntry g_sessions[MAX_ACTIVE_SESSIONS] = {0};
+
+void auth_sessions_cleanup(void) {
+    time_t now = time(NULL);
+    for (int i = 0; i < MAX_ACTIVE_SESSIONS; i++) {
+        if (g_sessions[i].valid && (now - g_sessions[i].last_active_at > SESSION_TTL_SECONDS)) {
+            memset(&g_sessions[i], 0, sizeof(SessionEntry));
+        }
+    }
+}
+
+StatusCode auth_session_create(const User *user, char *out_token, size_t out_len) {
+    if (!user || !out_token || out_len < AUTH_SESSION_TOKEN_LEN) {
+        return STATUS_INVALID_INPUT;
+    }
+
+    auth_sessions_cleanup();
+
+    unsigned char raw_token[32];
+    if (RAND_bytes(raw_token, sizeof(raw_token)) != 1) {
+        fprintf(stderr, "[SECURITY ERROR] RAND_bytes failed for session token\n");
+        return STATUS_ERROR;
+    }
+
+    char hex_token[AUTH_SESSION_TOKEN_LEN];
+    bytes_to_hex(raw_token, sizeof(raw_token), hex_token);
+
+    int slot_idx = -1;
+    time_t oldest_time = time(NULL);
+    int oldest_idx = 0;
+
+    for (int i = 0; i < MAX_ACTIVE_SESSIONS; i++) {
+        if (!g_sessions[i].valid) {
+            slot_idx = i;
+            break;
+        }
+        if (g_sessions[i].last_active_at < oldest_time) {
+            oldest_time = g_sessions[i].last_active_at;
+            oldest_idx = i;
+        }
+    }
+
+    if (slot_idx < 0) {
+        slot_idx = oldest_idx;
+    }
+
+    safe_strncpy(g_sessions[slot_idx].token, hex_token, sizeof(g_sessions[slot_idx].token));
+    g_sessions[slot_idx].user = *user;
+    g_sessions[slot_idx].created_at = time(NULL);
+    g_sessions[slot_idx].last_active_at = time(NULL);
+    g_sessions[slot_idx].valid = true;
+
+    safe_strncpy(out_token, hex_token, out_len);
+    return STATUS_OK;
+}
+
+StatusCode auth_session_validate(const char *token, User *out_user) {
+    if (!token || strlen(token) != 64) {
+        return STATUS_AUTH_FAILED;
+    }
+
+    time_t now = time(NULL);
+    for (int i = 0; i < MAX_ACTIVE_SESSIONS; i++) {
+        if (g_sessions[i].valid && strcmp(g_sessions[i].token, token) == 0) {
+            if (now - g_sessions[i].last_active_at > SESSION_TTL_SECONDS) {
+                g_sessions[i].valid = false;
+                return STATUS_AUTH_FAILED;
+            }
+
+            /* Live database check: re-verify user status and latest role */
+            sqlite3 *db = db_get_handle();
+            if (db) {
+                sqlite3_stmt *stmt = NULL;
+                const char *sql = "SELECT role, active FROM users WHERE id = ?;";
+                if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, g_sessions[i].user.id);
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char *role_str = (const char *)sqlite3_column_text(stmt, 0);
+                        int active = sqlite3_column_int(stmt, 1);
+                        if (!active) {
+                            sqlite3_finalize(stmt);
+                            g_sessions[i].valid = false;
+                            return STATUS_AUTH_FAILED;
+                        }
+                        g_sessions[i].user.role = auth_string_to_role(role_str);
+                        g_sessions[i].user.active = true;
+                    } else {
+                        sqlite3_finalize(stmt);
+                        g_sessions[i].valid = false;
+                        return STATUS_AUTH_FAILED;
+                    }
+                    sqlite3_finalize(stmt);
+                }
+            }
+
+            g_sessions[i].last_active_at = now;
+            if (out_user) {
+                *out_user = g_sessions[i].user;
+            }
+            return STATUS_OK;
+        }
+    }
+
+    return STATUS_AUTH_FAILED;
+}
+
+StatusCode auth_session_destroy(const char *token) {
+    if (!token) return STATUS_INVALID_INPUT;
+    for (int i = 0; i < MAX_ACTIVE_SESSIONS; i++) {
+        if (g_sessions[i].valid && strcmp(g_sessions[i].token, token) == 0) {
+            memset(&g_sessions[i], 0, sizeof(SessionEntry));
+            return STATUS_OK;
+        }
+    }
+    return STATUS_OK;
 }

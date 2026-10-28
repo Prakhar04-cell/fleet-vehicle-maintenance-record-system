@@ -1,4 +1,5 @@
 #include "input.h"
+#include <ctype.h>
 
 #ifdef _WIN32
 #include <conio.h>

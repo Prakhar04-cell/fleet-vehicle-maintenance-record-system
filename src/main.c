@@ -4,11 +4,15 @@
 #include "input.h"
 #include "ui.h"
 #include "schedule.h"
+#include "dsa.h"
+#include "http_server.h"
 
 static void print_usage(const char *prog_name) {
     printf("Usage: %s [OPTIONS]\n", prog_name);
     printf("Options:\n");
     printf("  --check-reminders    Run headless maintenance reminder evaluation and exit (for OS task scheduler / cron)\n");
+    printf("  --web, --server [p]  Start embedded C HTTP server and white/grey web dashboard (default: %d)\n", DEFAULT_HTTP_PORT);
+    printf("  --dsa                Run Academic DSA demonstration suite (Hash Table, BST, Min-Heap, etc.)\n");
     printf("  --db <path>          Use specified SQLite database file (default: %s)\n", DEFAULT_DB_PATH);
     printf("  --help, -h           Show this help message and exit\n");
     printf("  --version, -v        Show program version\n");
@@ -93,6 +97,9 @@ static bool perform_login(void) {
 int main(int argc, char *argv[]) {
     const char *db_path = DEFAULT_DB_PATH;
     bool headless_reminders = false;
+    bool run_web = false;
+    int web_port = DEFAULT_HTTP_PORT;
+    bool run_dsa = false;
 
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
@@ -104,6 +111,18 @@ int main(int argc, char *argv[]) {
             return 0;
         } else if (strcmp(argv[i], "--check-reminders") == 0) {
             headless_reminders = true;
+        } else if (strcmp(argv[i], "--dsa") == 0) {
+            run_dsa = true;
+        } else if (strcmp(argv[i], "--web") == 0) {
+            run_web = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                web_port = atoi(argv[++i]);
+            }
+        } else if (strcmp(argv[i], "--server") == 0) {
+            run_web = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                web_port = atoi(argv[++i]);
+            }
         } else if (strcmp(argv[i], "--db") == 0 && i + 1 < argc) {
             db_path = argv[++i];
         } else {
@@ -123,6 +142,20 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Fatal: Schema migration failed.\n");
         db_close();
         return 1;
+    }
+
+    /* DSA Algorithm Demonstrations */
+    if (run_dsa) {
+        dsa_run_full_demonstration();
+        db_close();
+        return 0;
+    }
+
+    /* Embedded C HTTP Web Server */
+    if (run_web) {
+        http_server_start(web_port);
+        db_close();
+        return 0;
     }
 
     /* Headless background mode (e.g. cron / Windows Task Scheduler) */

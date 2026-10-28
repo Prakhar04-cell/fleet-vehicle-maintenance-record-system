@@ -1,3 +1,4 @@
+/* Fleet Vehicle Maintenance Record System - Enterprise User Interface */
 #include "ui.h"
 #include "input.h"
 #include "vehicle.h"
@@ -11,6 +12,8 @@
 #include "reports.h"
 #include "backup.h"
 #include "database.h"
+#include "dsa.h"
+#include "http_server.h"
 
 void ui_init(void) {
     /* Initialize console or formatting if needed */
@@ -239,7 +242,7 @@ static void ui_list_vehicles(void) {
     printf("+-----+---------------+----------------------+------+----------+------------+--------------------+--------------------+\n");
 
     for (int i = 0; i < count; i++) {
-        char mm[64];
+        char mm[MAX_BUFFER_MD];
         snprintf(mm, sizeof(mm), "%s %s", list[i].make, list[i].model);
         printf("| %-3d | %-13s | %-20s | %-4d | %-6d%%  | %-8d km | %-18s | %-18s |\n",
                list[i].id, list[i].registration_number, mm, list[i].manufacturing_year,
@@ -333,11 +336,12 @@ void ui_menu_vehicles(void) {
         printf(" 8. Assign / Unassign Driver\n");
         printf(" 9. Archive (Decommission) Vehicle\n");
         printf(" 10. Restore Archived Vehicle\n");
+        printf(" 11. Permanently Delete Vehicle (Blocked if records exist)\n");
         printf(" 0. Return to Main Menu\n");
         ui_print_divider('-', 50);
 
         int choice = -1;
-        if (!input_get_int("Enter Choice [0-10]: ", &choice, 0, 10)) continue;
+        if (!input_get_int("Enter Choice [0-11]: ", &choice, 0, 11)) continue;
         if (choice == 0) break;
 
         const User *u = auth_get_session_user();
@@ -434,6 +438,25 @@ void ui_menu_vehicles(void) {
                 input_pause();
                 break;
             }
+            case 11: {
+                if (!u || !auth_has_permission(u->role, PERM_VEHICLE_WRITE)) {
+                    ui_print_error("Permission denied."); input_pause(); break;
+                }
+                int vid = 0;
+                input_get_int("Enter Vehicle ID to Permanently Delete: ", &vid, 1, 100000);
+                if (input_get_confirm("Are you sure? This action CANNOT be undone!", false)) {
+                    StatusCode sc = vehicle_delete(vid, u->id);
+                    if (sc == STATUS_OK) {
+                        ui_print_success("Vehicle permanently deleted from database.");
+                    } else if (sc == STATUS_FORBIDDEN) {
+                        ui_print_error("Cannot delete vehicle: Dependent maintenance or expense records exist. Archive vehicle instead.");
+                    } else {
+                        ui_print_error("Failed to delete vehicle.");
+                    }
+                }
+                input_pause();
+                break;
+            }
         }
     }
 }
@@ -448,11 +471,13 @@ void ui_menu_drivers(void) {
         printf(" 2. Add New Driver\n");
         printf(" 3. Update Driver Contact / License Info\n");
         printf(" 4. Activate / Deactivate Driver\n");
+        printf(" 5. Search Drivers by Name / Phone / License\n");
+        printf(" 6. Permanently Delete Driver (Blocked if assigned)\n");
         printf(" 0. Return to Main Menu\n");
         ui_print_divider('-', 50);
 
         int choice = -1;
-        if (!input_get_int("Enter Choice [0-4]: ", &choice, 0, 4)) continue;
+        if (!input_get_int("Enter Choice [0-6]: ", &choice, 0, 6)) continue;
         if (choice == 0) break;
 
         switch (choice) {
@@ -495,7 +520,7 @@ void ui_menu_drivers(void) {
                 if (sc == STATUS_EXISTS) {
                     ui_print_error("Driver with this license number already exists.");
                 } else if (sc == STATUS_OK) {
-                    char msg[MAX_BUFFER_MD];
+                    char msg[MAX_BUFFER_LG];
                     snprintf(msg, sizeof(msg), "Driver '%s' created successfully (ID %d).", d.name, new_id);
                     ui_print_success(msg);
                 } else {
@@ -540,6 +565,46 @@ void ui_menu_drivers(void) {
                     ui_print_success("Driver status changed.");
                 } else {
                     ui_print_error("Failed to change driver status.");
+                }
+                input_pause();
+                break;
+            }
+            case 5: {
+                char query[MAX_BUFFER_MD];
+                if (input_get_string("Enter Search Query: ", query, sizeof(query), false)) {
+                    Driver *res = NULL;
+                    int cnt = 0;
+                    if (driver_search(query, &res, &cnt) == STATUS_OK && cnt > 0) {
+                        printf("\nFound %d matching driver(s):\n", cnt);
+                        for (int i = 0; i < cnt; i++) {
+                            printf(" - ID: %d | %s | %s | Lic: %s | Exp: %s | %s\n",
+                                   res[i].id, res[i].name, res[i].phone, res[i].license_number,
+                                   res[i].license_expiry, res[i].active ? "ACTIVE" : "INACTIVE");
+                        }
+                        driver_free_list(res);
+                    } else {
+                        ui_print_info("No matching drivers found.");
+                    }
+                    input_pause();
+                }
+                break;
+            }
+            case 6: {
+                const User *u = auth_get_session_user();
+                if (!u || !auth_has_permission(u->role, PERM_VEHICLE_WRITE)) {
+                    ui_print_error("Permission denied."); input_pause(); break;
+                }
+                int id = 0;
+                input_get_int("Enter Driver ID to Delete: ", &id, 1, 100000);
+                if (input_get_confirm("Are you sure you want to delete this driver?", false)) {
+                    StatusCode sc = driver_delete(id, u->id);
+                    if (sc == STATUS_OK) {
+                        ui_print_success("Driver deleted successfully.");
+                    } else if (sc == STATUS_FORBIDDEN) {
+                        ui_print_error("Cannot delete driver: Driver is currently assigned to an active vehicle. Reassign first.");
+                    } else {
+                        ui_print_error("Driver not found or database error.");
+                    }
                 }
                 input_pause();
                 break;
@@ -1448,7 +1513,7 @@ void ui_menu_backup(void) {
                 char path[MAX_BUFFER_LG];
                 printf("[BACKUP] Starting SQLite online hot backup...\n");
                 if (backup_create(DEFAULT_BACKUP_DIR, path, sizeof(path)) == STATUS_OK) {
-                    char msg[MAX_BUFFER_LG];
+                    char msg[MAX_BUFFER_XL];
                     snprintf(msg, sizeof(msg), "Backup created successfully at: %s", path);
                     ui_print_success(msg);
                 } else {
@@ -1523,11 +1588,13 @@ void ui_run_main_loop(void) {
         }
 
         printf(" 12. Change Password\n");
+        printf(" 13. Academic Data Structures & Algorithms (DSA) Demonstrator\n");
+        printf(" 14. Launch Professional White/Grey Web Dashboard (C HTTP Server)\n");
         printf(" 0.  Logout & Exit\n");
         ui_print_divider('-', 50);
 
         int choice = -1;
-        if (!input_get_int("Enter Option: ", &choice, 0, 12)) continue;
+        if (!input_get_int("Enter Option [0-14]: ", &choice, 0, 14)) continue;
         if (choice == 0) {
             auth_logout();
             printf("\nLogged out successfully. Thank you for using %s.\n", APP_NAME);
@@ -1568,6 +1635,15 @@ void ui_run_main_loop(void) {
                 input_pause();
                 break;
             }
+            case 13:
+                dsa_run_full_demonstration();
+                input_pause();
+                break;
+            case 14:
+                printf("\nStarting embedded C HTTP Server on port %d...\n", DEFAULT_HTTP_PORT);
+                http_server_start(DEFAULT_HTTP_PORT);
+                input_pause();
+                break;
         }
     }
 }

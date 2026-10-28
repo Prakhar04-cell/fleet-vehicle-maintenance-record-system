@@ -63,89 +63,137 @@ An enterprise-grade Fleet Vehicle Maintenance & Operational Record System implem
   - RFC 4180 compliant CSV exports with active protection against spreadsheet formula injection (CWE-1236).
   - Native standard-compliant vector PDF 1.4 document generator written in C: produces genuine PDF vector files with branded headers, KPI cards, structured tabular data, and page numbers.
 
+- **Data Structures & Algorithms (Academic Suite):**
+  - Pure C11 implementations of Hash Table (DJB2), Binary Search Tree (Odometer indexing), Min-Heap (Maintenance urgency priority queue), FIFO Queue (Service dispatch), LIFO Stack (Operational undo), Merge Sort (Multi-attribute stable sorting), Dijkstra's Algorithm (Fleet logistics shortest path), Dynamic Programming (0-1 Knapsack quarterly budget optimizer), and Branch & Bound (Traveling Salesperson mobile mechanic tour).
+
+- **Modern White/Grey Web Dashboard:**
+  - Embedded pure C HTTP/1.1 server running on Windows Winsock2 (`ws2_32`). Zero external Node/Python/Flask runtime dependencies.
+  - White-and-grey responsive dashboard (`http://127.0.0.1:8080`) featuring live KPI cards, interactive modals, CRUD data tables, live DSA visualization, and hot backup triggers.
+
 ---
 
 ## Technology Stack & Architecture
 
 - **Core Language:** Pure C (C11 standard, compiled with `-Wall -Wextra -Wpedantic -O2`).
-- **Database Engine:** SQLite 3 via native C API (`sqlite3.h`).
+- **Database Engine:** SQLite 3 via native C API (`sqlite3.h`) with WAL mode and PRAGMA foreign keys.
 - **Cryptography:** OpenSSL 3.x EVP (`openssl/evp.h`, `openssl/rand.h`, `openssl/crypto.h`).
-- **PDF Engine:** Native vector PDF 1.4 generation module (`pdf_gen.c`) with optional `libharu` hook.
-- **Build System:** GNU Make (`Makefile`).
+- **Networking:** Native embedded C HTTP/1.1 socket server using Windows Winsock2 (`-lws2_32`).
+- **PDF Engine:** Native vector PDF 1.4 generation module (`pdf_gen.c`).
+- **Build System:** GNU Make (`Makefile`) with MSYS2 UCRT64 auto-detection.
 
 ### Project Structure
 
 ```
 fleet vehicle maintenance record system/
-├── Makefile                          # Unified build system
+├── Makefile                          # Unified build system (all, test, web, dsa, seed, clean)
 ├── README.md                         # Documentation and operational manual
 ├── .gitignore                        # Git exclusion rules
 ├── migrations/
-│   └── 001_initial_schema.sql        # Initial normalized SQLite schema migration
+│   └── 001_initial_schema.sql        # Normalized SQLite schema migration
 ├── include/
 │   ├── common.h                      # Shared types, constants, date & string utilities
 │   ├── database.h                    # Connection, transactions, and migration logic
 │   ├── auth.h                        # PBKDF2 hashing, session, and RBAC flags
 │   ├── input.h                       # Safe fgets-based bounded user input routines
-│   ├── vehicle.h                     # Vehicle management and search prototypes
-│   ├── driver.h                      # Driver records and assignment rules
+│   ├── vehicle.h                     # Vehicle CRUD, search, and relational deletion
+│   ├── driver.h                      # Driver CRUD, search, unassign cascade, and delete
 │   ├── maintenance.h                 # Service records and vehicle history
-│   ├── schedule.h                    # Preventive maintenance scheduling and threshold checks
+│   ├── schedule.h                    # Preventive maintenance scheduling & reminder evaluation
 │   ├── expense.h                     # Cost tracking and financial aggregations
 │   ├── notification.h                # In-app persistent alert management
 │   ├── audit.h                       # Security and operational audit logging
-│   ├── dashboard.h                   # Aggregated fleet analytics and KPIs
+│   ├── dashboard.h                   # Real-time SQL aggregations and KPIs
+│   ├── dsa.h                         # Pure C11 DSA definitions (9 structures & algorithms)
+│   ├── http_server.h                 # Embedded C HTTP/1.1 server and REST API dispatcher
 │   ├── pdf_gen.h                     # Native vector PDF 1.4 generation engine
 │   ├── reports.h                     # CSV and PDF report generators
 │   ├── backup.h                      # SQLite online backup and restore API
-│   └── ui.h                          # Terminal user interface and menus
+│   └── ui.h                          # Interactive enterprise console interface
 ├── src/
-│   ├── main.c                        # Application entry point and CLI argument parser
+│   ├── main.c                        # Application entry point, CLI arguments (--web, --dsa)
 │   ├── common.c                      # Utility implementations
 │   ├── database.c                    # Database engine interface
-│   ├── auth.c                        # OpenSSL cryptographic authentication
+│   ├── auth.c                        # OpenSSL cryptographic authentication & user API
 │   ├── input.c                       # Secure input parsing
-│   ├── vehicle.c                     # Vehicle business logic
-│   ├── driver.c                      # Driver management logic
+│   ├── vehicle.c                     # Vehicle business logic & relational delete
+│   ├── driver.c                      # Driver management logic & search
 │   ├── maintenance.c                 # Maintenance service record logic
 │   ├── schedule.c                    # Preventive maintenance & reminder evaluation
 │   ├── expense.c                     # Financial analytics logic
 │   ├── notification.c                # Notification deduplication engine
 │   ├── audit.c                       # Audit logging implementation
 │   ├── dashboard.c                   # Real-time SQL aggregations
+│   ├── dsa.c                         # Pure C implementations of all 9 DSA algorithms
+│   ├── http_server.c                 # Winsock2 socket server, static router & REST endpoints
 │   ├── pdf_gen.c                     # Vector PDF stream, catalog, font, and xref generator
 │   ├── reports_csv.c                 # CSV export engine with formula sanitization
 │   ├── reports_pdf.c                 # Executive PDF report builders
 │   ├── backup.c                      # SQLite hot backup and disaster recovery
 │   └── ui.c                          # Interactive enterprise console interface
+├── web/                              # Professional White/Grey Web UI
+│   ├── index.html                    # Semantic HTML5 layout and modal dialogs
+│   ├── dashboard.css                 # Clean white/grey palette, card styles, and animations
+│   └── app.js                        # Vanilla ES6 client interacting with C REST APIs
 ├── tests/
-│   └── test_main.c                   # Automated test suite (115 test cases)
+│   └── test_main.c                   # Automated test suite (150 test assertions)
 ├── data/
 │   ├── fleet.db                      # Production SQLite database (created on first launch)
 │   └── seed_sample_data.sql          # Sample development / demonstration dataset
 ├── reports/                          # Directory for exported CSV and PDF reports
+│   ├── final_gap_audit.md            # Comprehensive repository gap audit
+│   ├── dsa_implementation_report.md  # Detailed DSA implementation & complexity analysis
+│   └── final_verification_report.md  # System verification and delivery report
 └── backups/                          # Timestamped hot backup storage
 ```
 
 ---
 
-## Role-Based Access Control (RBAC)
+## Role-Based Access Control (RBAC) & Three Role Dashboards
 
-The system implements four distinct operational roles:
+The system enforces strict server-side authorization powered by **256-bit cryptographically secure session tokens (`RAND_bytes`)** and **`HttpOnly; SameSite=Strict` cookies**. The frontend provides three distinct, tailored SaaS dashboard experiences based on the verified role:
+
+### 1. Three Dedicated Role Dashboard Views
+- **Administrator Dashboard ("System Overview"):**
+  - Full fleet & financial overview with 7 real-time KPI cards.
+  - SVG Fleet status donut chart, monthly expense trends, and category cost distributions.
+  - Live Security & System Audit Events feed.
+  - Disaster Recovery, Database Snapshot management, DSA Optimization suite, and User Account management.
+- **Fleet Manager Dashboard ("Fleet Operations"):**
+  - Operational dispatch & vehicle availability metrics (6 operational KPIs).
+  - Driver & Commercial Vehicle Allocation Roster with one-click re-assignment drawers.
+  - Actionable Overdue Maintenance alerts and schedules.
+  - Prohibits vehicle/driver deletion, user account management, and database backup restoration.
+- **Maintenance Staff Dashboard ("Maintenance Workspace"):**
+  - Workshop Service Workload Hero Card with 4 real-time counters (*Vehicles In Bay*, *Overdue Services*, *Due Soon*, *Completed Records*).
+  - Actionable Pending & Scheduled Work Orders table with one-click "+ Record Service" prefilling and "Complete" milestone workflows.
+  - Active Workshop Bays live queue widget and recent completed service history log.
+  - Restricts access from financial expense records, commercial driver administration, and system settings.
+
+### 2. Granular Role-Permission Policy
 
 | Feature / Operation | Administrator (`admin`) | Fleet Manager (`manager`) | Maintenance Staff (`staff`) | Viewer (`viewer`) |
 | :--- | :---: | :---: | :---: | :---: |
-| View Dashboard & Asset Lists | Yes | Yes | Yes | Yes |
-| View Service History & Expenses | Yes | Yes | Yes | Yes |
-| Add / Edit Vehicles & Drivers | Yes | Yes | No | No |
-| Update Odometer / Fuel Status | Yes | Yes | Yes | No |
-| Log Maintenance Records | Yes | Yes | Yes | No |
-| Create / Complete Schedules | Yes | Yes | Yes | No |
-| Record Operating Expenses | Yes | Yes | No | No |
-| Export CSV & PDF Reports | Yes | Yes | No | No |
-| Security Audit Trail Access | Yes | No | No | No |
-| User Accounts & Role Admin | Yes | No | No | No |
-| Database Backup & Restore | Yes | No | No | No |
+| View Telemetry & Dashboard | **Yes** | **Yes** | **Yes** | **Yes** |
+| View Service History & Reminders | **Yes** | **Yes** | **Yes** | **Yes** |
+| View Vehicles Register | **Yes** | **Yes** | **Yes** | **Yes** |
+| Add / Update Vehicle Specs | **Yes** | **Yes** | No (403) | No (403) |
+| Delete Vehicle Asset | **Yes** | No (403) | No (403) | No (403) |
+| View Commercial Drivers | **Yes** | **Yes** | No (403) | No (403) |
+| Add / Update / Assign Driver | **Yes** | **Yes** | No (403) | No (403) |
+| Delete Driver Profile | **Yes** | No (403) | No (403) | No (403) |
+| Record Service Work Order | **Yes** | **Yes** | **Yes** | No (403) |
+| Create / Reschedule Schedule | **Yes** | **Yes** | **Yes** | No (403) |
+| Complete Schedule Milestone | **Yes** | **Yes** | **Yes** | No (403) |
+| Evaluate Reminder Thresholds | **Yes** | **Yes** | **Yes** | No (403) |
+| View & Manage Expense Ledger | **Yes** | **Yes** | No (403) | No (403) |
+| Export CSV & Vector PDF Reports | **Yes** | **Yes** | No (403) | No (403) |
+| Inspect Security Audit Trail | **Yes** | No (403) | No (403) | No (403) |
+| Trigger Online Hot Backup | **Yes** | No (403) | No (403) | No (403) |
+| User Account & Role Management | **Yes** | No (403) | No (403) | No (403) |
+
+Detailed matrix and verification reports:
+- [Role Permission Matrix](reports/role_permission_matrix.md)
+- [Automated RBAC Test Results](reports/rbac_test_results.md)
 
 ---
 
@@ -221,7 +269,74 @@ make clean
 
 ## Running the Application
 
-### 1. Interactive Enterprise Interface
+### 1. Modern White/Grey Web Dashboard (Enterprise Fleet SaaS)
+Launch the embedded pure C HTTP server and open the browser:
+```bash
+# Set MSYS2 UCRT64 toolchain PATH (Windows PowerShell):
+$env:PATH="C:\msys64\ucrt64\bin;C:\msys64\usr\bin;" + $env:PATH
+
+# Start the web dashboard server:
+.\fleet.exe --web 8080
+# or via Makefile target:
+mingw32-make web
+```
+Then navigate to: **`http://127.0.0.1:8080`**
+
+#### Pre-Configured Demo Accounts (PBKDF2-HMAC-SHA256):
+| Role | Username | Password | Permissions |
+|---|---|---|---|
+| **Administrator** | `admin` | `Admin@123` | Full access: User management, backups, vehicle/service CRUD |
+| **Manager** | `manager` | `Manager@123` | Fleet operations, vehicle write, maintenance write |
+| **Staff** | `staff` | `Staff@123` | Maintenance logging, schedule execution |
+
+*(Click the user profile pill in the top-right header to switch roles instantly with 1-click quick-fill buttons).*
+
+#### Direct PDF & CSV Report Endpoints:
+- **Fleet Executive Summary (PDF):** `http://127.0.0.1:8080/api/reports/pdf?type=fleet`
+- **Operating Expenses Ledger (PDF):** `http://127.0.0.1:8080/api/reports/pdf?type=expenses`
+- **Vehicle Maintenance Dossier (PDF):** `http://127.0.0.1:8080/api/reports/pdf?type=maintenance&vehicle_id=1`
+- **Vehicles Master Register (CSV):** `http://127.0.0.1:8080/api/reports/csv?type=vehicles`
+- **Maintenance Logs (CSV):** `http://127.0.0.1:8080/api/reports/csv?type=maintenance`
+- **Expenses Ledger (CSV):** `http://127.0.0.1:8080/api/reports/csv?type=expenses`
+- **Schedules & Milestones (CSV):** `http://127.0.0.1:8080/api/reports/csv?type=schedules`
+- **Monthly Spending Trends (CSV):** `http://127.0.0.1:8080/api/reports/csv?type=spending`
+- **Vehicle Lifetime Costs (CSV):** `http://127.0.0.1:8080/api/reports/csv?type=vehicle_costs`
+
+#### Key SaaS Dashboard Features
+- **Modern White/Light-Grey SaaS Theme:** `#F8FAFC` background, pure white `#FFFFFF` cards, `#E2E8F0` borders, `#0F172A` charcoal text, and professional `#2563EB` blue accents.
+- **Top 7 KPI Metric Cards:** Real-time metrics for Total Assets, Available Vehicles, In Maintenance, Out of Service, Overdue Services, Upcoming Milestones, and Total Spend.
+- **Interactive Native SVG Charts (Zero Dependencies):**
+  - **Fleet Status Distribution Donut Chart:** Interactive ring chart with live percentages, central fleet count, and color-coded status legend.
+  - **Monthly Expenditure Bar Chart:** Multi-month maintenance and operational spending trend with coordinate axes and tooltips.
+  - **Category Breakdown Progress Bars:** Fuel vs Periodic Maintenance vs Spare Parts vs Toll Taxes.
+- **Reference-Inspired Vehicles Management Table:**
+  - Real-time search across Reg Number, Make, Model, VIN, Driver.
+  - Filters by Status (Available, On Trip, Maintenance, Out of Service) and Fuel Type (Diesel, Petrol, CNG, Electric).
+  - Configurable Columns Picker: Toggle visibility of Make/Model, Year/VIN, Fuel Gauge, Odometer, Driver, Insurance, Status.
+  - Sortable column headers (ascending / descending).
+  - Mini Fuel Gauge progress bar (green >50%, amber 20-50%, red <20%).
+  - Pagination controls with configurable page size (5, 10, 25).
+- **Slide-Over Vehicle Detail Drawer:**
+  - Smooth 540px slide-in drawer with backdrop blur.
+  - Large Odometer, Fuel %, and Status hero cards.
+  - 4 Tabbed Views: Specs & Overview, Service History, Schedules, and Operating Expenses.
+  - Direct action buttons: "Edit Specifications", "Change Driver", "Log Maintenance", and "Add Expense".
+- **Preventive Maintenance & Reminders:**
+  - Dedicated tabs for Service Records, Schedules, and Overdue Reminders.
+  - Urgent reminder cards grouped by Overdue (Red), Due Soon (Amber), and Upcoming (Blue).
+  - 1-Click "Record Service" action that pre-fills vehicle and milestone details in the maintenance form.
+- **One-Click CSV Reports:** Immediate browser download for Vehicles Master, Maintenance History, Operating Expenses, and Preventive Schedules with CSV formula-injection protection.
+- **Audit Trail & Hot Backups:** Live view of the SQLite immutable audit ledger and one-click hot online backups via the native SQLite Online Backup API.
+
+### 2. Academic DSA Demonstration Suite
+Run the live academic Data Structures and Algorithms demonstrator and benchmark harness:
+```bash
+./fleet --dsa
+# or via Makefile:
+mingw32-make dsa
+```
+
+### 3. Interactive Console Interface
 ```bash
 ./fleet
 # or on Windows:
@@ -230,7 +345,7 @@ make clean
 
 On first launch, if no administrator account exists, the application presents the **Initial System Configuration** wizard. Enter your desired master administrator username and secure password (minimum 6 characters).
 
-### 2. Command-Line Options
+### 4. Command-Line Options
 ```bash
 ./fleet --help
 ```
@@ -238,6 +353,8 @@ Output:
 ```
 Options:
   --check-reminders    Run headless maintenance reminder evaluation and exit (for OS task scheduler / cron)
+  --web, --server [p]  Start embedded C HTTP server and white/grey web dashboard (default: 8080)
+  --dsa                Run Academic DSA demonstration suite (Hash Table, BST, Min-Heap, etc.)
   --db <path>          Use specified SQLite database file (default: data/fleet.db)
   --help, -h           Show this help message and exit
   --version, -v        Show program version
@@ -457,11 +574,38 @@ The automated test runner (`test_runner.exe`) executes 115 independent assertion
 [RESTORE] Creating safety snapshot of current database before restore...
 [RESTORE] Safety snapshot saved to: backups/fleet_backup_20261027_235522.db
   [PASS] Restored database from backup file with pre-restore safety snapshot
-  [PASS] Database integrity verified after restore
   [PASS] Vehicle data intact after backup restoration
+  [PASS] Prevent deleting vehicle with active maintenance or expense records
+
+=== 8. Running Data Structures & Algorithms (C11) Tests ===
+  [PASS] DSA Hash Table initialized
+  [PASS] DSA Hash Table size is 3 after insertions
+  [PASS] DSA Hash Table O(1) lookup found correct vehicle
+  [PASS] DSA Hash Table lookup returns NULL for absent key
+  [PASS] DSA Hash Table successfully removed key
+  [PASS] DSA BST O(log N) search finds vehicle by odometer key
+  [PASS] DSA BST min key is 15,000 km
+  [PASS] DSA BST max key is 45,000 km
+  [PASS] DSA BST range query [10000, 35000] returns 2 vehicles
+  [PASS] DSA BST successfully deleted node
+  [PASS] DSA Min-Heap peek returns highest priority (-3 days overdue)
+  [PASS] DSA Min-Heap extract min pops most overdue schedule
+  [PASS] DSA Min-Heap second extraction is next in priority
+  [PASS] DSA Queue size is 2
+  [PASS] DSA Queue maintains strict FIFO order (first in is first out)
+  [PASS] DSA Queue is empty after 2 dequeues
+  [PASS] DSA Stack size is 2
+  [PASS] DSA Stack maintains LIFO order (last in is first out)
+  [PASS] DSA Stack empty after pops
+  [PASS] DSA Merge Sort correctly orders vehicles by odometer ascending in O(N log N)
+  [PASS] DSA Merge Sort correctly orders vehicles by odometer descending
+  [PASS] DSA Fleet Graph initialized with 6 nodes
+  [PASS] DSA Dijkstra computes correct shortest path distance (26 km from Depot to East Cargo)
+  [PASS] DSA DP Knapsack correctly optimizes fleet maintenance safety under budget
+  [PASS] DSA Branch & Bound TSP finds optimal inspection circuit cost (80 km)
 
 =================================================================
- TEST RESULTS SUMMARY: 115 / 115 Tests Passed (100%)
+ TEST RESULTS SUMMARY: 150 / 150 Tests Passed (100%)
 =================================================================
 ```
 

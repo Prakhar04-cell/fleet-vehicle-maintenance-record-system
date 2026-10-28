@@ -1,4 +1,5 @@
 #include "common.h"
+#include <ctype.h>
 
 void str_trim(char *str) {
     if (!str) return;

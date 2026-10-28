@@ -20,6 +20,9 @@ typedef enum {
 #define PERM_REPORTS             (1 << 5)
 #define PERM_USER_MANAGE         (1 << 6)
 #define PERM_BACKUP_RESTORE      (1 << 7)
+#define PERM_VEHICLE_DELETE      (1 << 8)
+#define PERM_DRIVER_WRITE        (1 << 9)
+#define PERM_AUDIT_VIEW          (1 << 10)
 
 #define SALT_BYTE_LENGTH 16
 #define HASH_HEX_LENGTH 65
@@ -53,6 +56,8 @@ StatusCode auth_change_password(int user_id, const char *old_password, const cha
 StatusCode auth_admin_reset_password(int admin_user_id, int target_user_id, const char *new_password);
 StatusCode auth_set_user_status(int admin_user_id, int target_user_id, bool active);
 StatusCode auth_list_users(void);
+StatusCode auth_get_users(User **out_users, int *out_count);
+void auth_free_users(User *users);
 
 /* Current session management */
 void auth_set_session_user(const User *user);
@@ -60,5 +65,12 @@ const User *auth_get_session_user(void);
 void auth_clear_session(void);
 void auth_logout(void);
 bool auth_is_logged_in(void);
+
+/* HTTP Cryptographic Session Token API */
+#define AUTH_SESSION_TOKEN_LEN 65
+StatusCode auth_session_create(const User *user, char *out_token, size_t out_len);
+StatusCode auth_session_validate(const char *token, User *out_user);
+StatusCode auth_session_destroy(const char *token);
+void auth_sessions_cleanup(void);
 
 #endif /* AUTH_H */

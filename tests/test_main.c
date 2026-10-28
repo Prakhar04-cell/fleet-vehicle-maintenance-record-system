@@ -11,6 +11,7 @@
 #include "dashboard.h"
 #include "reports.h"
 #include "backup.h"
+#include "dsa.h"
 
 #include <assert.h>
 
@@ -130,12 +131,74 @@ static void run_auth_tests(void) {
     /* Role-based Permission Flags */
     TEST_ASSERT(auth_has_permission(ROLE_ADMIN, PERM_USER_MANAGE) == true, "Admin has PERM_USER_MANAGE");
     TEST_ASSERT(auth_has_permission(ROLE_ADMIN, PERM_BACKUP_RESTORE) == true, "Admin has PERM_BACKUP_RESTORE");
+    TEST_ASSERT(auth_has_permission(ROLE_ADMIN, PERM_VEHICLE_DELETE) == true, "Admin has PERM_VEHICLE_DELETE");
+    TEST_ASSERT(auth_has_permission(ROLE_ADMIN, PERM_AUDIT_VIEW) == true, "Admin has PERM_AUDIT_VIEW");
+    
     TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_USER_MANAGE) == false, "Manager does not have PERM_USER_MANAGE");
+    TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_BACKUP_RESTORE) == false, "Manager does not have PERM_BACKUP_RESTORE");
+    TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_VEHICLE_DELETE) == false, "Manager does not have PERM_VEHICLE_DELETE");
+    TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_AUDIT_VIEW) == false, "Manager does not have PERM_AUDIT_VIEW");
     TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_VEHICLE_WRITE) == true, "Manager has PERM_VEHICLE_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_DRIVER_WRITE) == true, "Manager has PERM_DRIVER_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_EXPENSE_WRITE) == true, "Manager has PERM_EXPENSE_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_MANAGER, PERM_REPORTS) == true, "Manager has PERM_REPORTS");
+
     TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_VEHICLE_WRITE) == false, "Staff does not have PERM_VEHICLE_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_VEHICLE_DELETE) == false, "Staff does not have PERM_VEHICLE_DELETE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_DRIVER_WRITE) == false, "Staff does not have PERM_DRIVER_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_EXPENSE_WRITE) == false, "Staff does not have PERM_EXPENSE_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_REPORTS) == false, "Staff does not have PERM_REPORTS");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_BACKUP_RESTORE) == false, "Staff does not have PERM_BACKUP_RESTORE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_AUDIT_VIEW) == false, "Staff does not have PERM_AUDIT_VIEW");
     TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_MAINTENANCE_WRITE) == true, "Staff has PERM_MAINTENANCE_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_SCHEDULE_WRITE) == true, "Staff has PERM_SCHEDULE_WRITE");
+    TEST_ASSERT(auth_has_permission(ROLE_STAFF, PERM_READ) == true, "Staff has PERM_READ");
+
     TEST_ASSERT(auth_has_permission(ROLE_VIEWER, PERM_MAINTENANCE_WRITE) == false, "Viewer cannot write maintenance");
     TEST_ASSERT(auth_has_permission(ROLE_VIEWER, PERM_READ) == true, "Viewer has PERM_READ");
+
+    /* HTTP Cryptographic Session Token Lifecycle */
+    char admin_token[AUTH_SESSION_TOKEN_LEN] = {0};
+    sc = auth_session_create(&u, admin_token, sizeof(admin_token));
+    TEST_ASSERT(sc == STATUS_OK, "Successfully generated 64-hex char cryptographic session token");
+    TEST_ASSERT(strlen(admin_token) == 64, "Session token is exactly 64 characters (256-bit hex)");
+
+    User validated_user = {0};
+    sc = auth_session_validate(admin_token, &validated_user);
+    TEST_ASSERT(sc == STATUS_OK, "Cryptographic session token validates successfully");
+    TEST_ASSERT(validated_user.id == u.id, "Validated session user ID matches");
+    TEST_ASSERT(validated_user.role == ROLE_ADMIN, "Validated session user has ROLE_ADMIN");
+
+    /* Invalid and corrupt tokens */
+    sc = auth_session_validate("invalid_or_truncated_token", &validated_user);
+    TEST_ASSERT(sc == STATUS_AUTH_FAILED, "Malformed session token is rejected");
+    sc = auth_session_validate(NULL, &validated_user);
+    TEST_ASSERT(sc == STATUS_AUTH_FAILED, "NULL session token is rejected");
+
+    /* Session destruction on logout */
+    sc = auth_session_destroy(admin_token);
+    TEST_ASSERT(sc == STATUS_OK, "Session destroyed successfully on logout");
+    sc = auth_session_validate(admin_token, &validated_user);
+    TEST_ASSERT(sc == STATUS_AUTH_FAILED, "Destroyed session token is immediately rejected");
+
+    /* Live account deactivation session check */
+    User staff_user = {0};
+    auth_login("staff_user", "StaffPass123", &staff_user);
+    char staff_token[AUTH_SESSION_TOKEN_LEN] = {0};
+    auth_session_create(&staff_user, staff_token, sizeof(staff_token));
+    TEST_ASSERT(auth_session_validate(staff_token, &validated_user) == STATUS_OK, "Staff session valid before deactivation");
+    
+    /* Deactivate staff account */
+    auth_set_user_status(u.id, staff_user.id, false);
+    TEST_ASSERT(auth_session_validate(staff_token, &validated_user) == STATUS_AUTH_FAILED, "Session validation rejects deactivated account");
+    auth_set_user_status(u.id, staff_user.id, true); /* Reactivate */
+
+    /* Programmatic User Retrieval */
+    User *all_users = NULL;
+    int user_cnt = 0;
+    sc = auth_get_users(&all_users, &user_cnt);
+    TEST_ASSERT(sc == STATUS_OK && user_cnt >= 4, "auth_get_users returns all active and configured accounts");
+    auth_free_users(all_users);
 }
 
 /* ==================== 2. VEHICLE & DRIVER TESTS ==================== */
@@ -267,6 +330,63 @@ static void run_vehicle_tests(void) {
     /* Driver 2 can now be reassigned since v2 is decommissioned */
     sc = vehicle_assign_driver(veh_id1, driver_id2, 1);
     TEST_ASSERT(sc == STATUS_OK, "Driver from decommissioned vehicle can be reassigned");
+
+    /* Driver Search */
+    Driver *found_drivers = NULL;
+    int f_cnt = 0;
+    sc = driver_search("Rajesh", &found_drivers, &f_cnt);
+    TEST_ASSERT(sc == STATUS_OK && f_cnt >= 1, "driver_search finds driver by name substring");
+    driver_free_list(found_drivers);
+
+    /* Create Driver 3 for deletion & unassign tests */
+    Driver d3 = {0};
+    strcpy(d3.name, "Vikram Singh");
+    strcpy(d3.phone, "+91-9988776655");
+    strcpy(d3.license_number, "DL-03-2022-55555");
+    strcpy(d3.license_expiry, "2029-01-01");
+    d3.active = true;
+    int driver_id3 = 0;
+    driver_create(&d3, &driver_id3);
+
+    /* Assign Driver 3 to temporary Vehicle 3 */
+    Vehicle v3 = {0};
+    strcpy(v3.registration_number, "MH-03-EF-3003");
+    strcpy(v3.make, "Ashok Leyland");
+    strcpy(v3.model, "Dost+");
+    v3.manufacturing_year = 2021;
+    strcpy(v3.vin, "AL1612003C3003");
+    strcpy(v3.fuel_type, "Diesel");
+    v3.fuel_percentage = 90;
+    v3.odometer_km = 12000;
+    strcpy(v3.status, "Available");
+    v3.assigned_driver_id = driver_id3;
+    int veh_id3 = 0;
+    sc = vehicle_create(&v3, &veh_id3);
+    TEST_ASSERT(sc == STATUS_OK && veh_id3 > 0, "Created temporary Vehicle 3 assigned to Driver 3");
+
+    /* Attempt to delete Driver 3 while assigned to an active vehicle -> Must fail with FORBIDDEN */
+    sc = driver_delete(driver_id3, 1);
+    TEST_ASSERT(sc == STATUS_FORBIDDEN, "Prevent deleting driver actively assigned to an active vehicle");
+
+    /* Deactivate Driver 3 -> Automatically unassigns Driver 3 from Vehicle 3 */
+    sc = driver_set_active(driver_id3, false);
+    TEST_ASSERT(sc == STATUS_OK, "Deactivated Driver 3");
+
+    Vehicle v3_check;
+    vehicle_get_by_id(veh_id3, &v3_check);
+    TEST_ASSERT(v3_check.assigned_driver_id == 0, "Deactivating driver automatically clears vehicle assignment");
+
+    /* Now delete unassigned Driver 3 -> Must succeed */
+    sc = driver_delete(driver_id3, 1);
+    TEST_ASSERT(sc == STATUS_OK, "Successfully deleted unassigned driver");
+
+    /* Clean Vehicle Deletion: Vehicle 3 has no maintenance/expense/schedule records -> delete should succeed */
+    sc = vehicle_delete(veh_id3, 1);
+    TEST_ASSERT(sc == STATUS_OK, "Clean vehicle deletion succeeds when no linked records exist");
+
+    /* Verify Vehicle 3 no longer exists */
+    sc = vehicle_get_by_id(veh_id3, &v3_check);
+    TEST_ASSERT(sc == STATUS_NOT_FOUND, "Deleted vehicle is no longer in database");
 }
 
 /* ==================== 3. MAINTENANCE RECORDS TESTS ==================== */
@@ -589,6 +709,174 @@ static void run_backup_and_audit_tests(void) {
     Vehicle v;
     sc = vehicle_get_by_reg("MH-01-AB-1001", &v);
     TEST_ASSERT(sc == STATUS_OK, "Vehicle data intact after backup restoration");
+
+    /* Prevent deleting vehicle with dependent maintenance/expense records */
+    sc = vehicle_delete(v.id, 1);
+    TEST_ASSERT(sc == STATUS_FORBIDDEN, "Prevent deleting vehicle with active maintenance or expense records");
+}
+
+/* ==================== 8. DATA STRUCTURES & ALGORITHMS (DSA) TESTS ==================== */
+static void run_dsa_tests(void) {
+    printf("\n=== 8. Running Data Structures & Algorithms (C11) Tests ===\n");
+
+    /* 1. Hash Table Tests */
+    DsaHashTable *ht = dsa_ht_create(16);
+    TEST_ASSERT(ht != NULL, "DSA Hash Table initialized");
+    Vehicle hv1 = { .id = 101, .odometer_km = 15000 };
+    strcpy(hv1.registration_number, "DL-01-AA-1111");
+    strcpy(hv1.make, "Tata");
+    Vehicle hv2 = { .id = 102, .odometer_km = 32000 };
+    strcpy(hv2.registration_number, "MH-02-BB-2222");
+    strcpy(hv2.make, "Mahindra");
+    Vehicle hv3 = { .id = 103, .odometer_km = 45000 };
+    strcpy(hv3.registration_number, "KA-03-CC-3333");
+    strcpy(hv3.make, "Eicher");
+
+    dsa_ht_insert(ht, &hv1);
+    dsa_ht_insert(ht, &hv2);
+    dsa_ht_insert(ht, &hv3);
+    TEST_ASSERT(dsa_ht_size(ht) == 3, "DSA Hash Table size is 3 after insertions");
+
+    const Vehicle *found_ht = dsa_ht_search(ht, "MH-02-BB-2222");
+    TEST_ASSERT(found_ht != NULL && found_ht->id == 102, "DSA Hash Table O(1) lookup found correct vehicle");
+
+    const Vehicle *not_found_ht = dsa_ht_search(ht, "NONEXISTENT");
+    TEST_ASSERT(not_found_ht == NULL, "DSA Hash Table lookup returns NULL for absent key");
+
+    bool removed = dsa_ht_remove(ht, "MH-02-BB-2222");
+    TEST_ASSERT(removed && dsa_ht_size(ht) == 2, "DSA Hash Table successfully removed key");
+    dsa_ht_destroy(ht);
+
+    /* 2. Binary Search Tree (BST) Tests */
+    DsaBSTNode *bst_root = NULL;
+    bst_root = dsa_bst_insert(bst_root, &hv2); /* 32000 */
+    bst_root = dsa_bst_insert(bst_root, &hv1); /* 15000 */
+    bst_root = dsa_bst_insert(bst_root, &hv3); /* 45000 */
+
+    const DsaBSTNode *bst_search_node = dsa_bst_search(bst_root, 32000);
+    TEST_ASSERT(bst_search_node != NULL && strcmp(bst_search_node->vehicle.registration_number, "MH-02-BB-2222") == 0,
+                "DSA BST O(log N) search finds vehicle by odometer key");
+
+    const DsaBSTNode *bst_min_node = dsa_bst_min(bst_root);
+    TEST_ASSERT(bst_min_node != NULL && bst_min_node->key == 15000, "DSA BST min key is 15,000 km");
+
+    const DsaBSTNode *bst_max_node = dsa_bst_max(bst_root);
+    TEST_ASSERT(bst_max_node != NULL && bst_max_node->key == 45000, "DSA BST max key is 45,000 km");
+
+    Vehicle range_results[10];
+    int range_cnt = 0;
+    dsa_bst_range_query(bst_root, 10000, 35000, range_results, &range_cnt, 10);
+    TEST_ASSERT(range_cnt == 2, "DSA BST range query [10000, 35000] returns 2 vehicles");
+
+    bst_root = dsa_bst_delete(bst_root, 32000);
+    TEST_ASSERT(dsa_bst_search(bst_root, 32000) == NULL, "DSA BST successfully deleted node");
+    dsa_bst_destroy(bst_root);
+
+    /* 3. Min-Heap (Priority Queue) Tests */
+    DsaMinHeap *heap = dsa_heap_create(10);
+    MaintenanceSchedule sched1 = { .id = 1 };
+    strcpy(sched1.service_name, "Oil Change");
+    MaintenanceSchedule sched2 = { .id = 2 };
+    strcpy(sched2.service_name, "Brake Inspection");
+    MaintenanceSchedule sched3 = { .id = 3 };
+    strcpy(sched3.service_name, "Tire Rotation");
+
+    dsa_heap_insert(heap, &sched1, 5);   /* due in 5 days */
+    dsa_heap_insert(heap, &sched2, -3);  /* overdue by 3 days -> highest priority */
+    dsa_heap_insert(heap, &sched3, 14);  /* due in 14 days */
+
+    const DsaHeapItem *top = dsa_heap_peek(heap);
+    TEST_ASSERT(top != NULL && top->priority_score == -3, "DSA Min-Heap peek returns highest priority (-3 days overdue)");
+
+    MaintenanceSchedule ext_sched;
+    int ext_prio;
+    dsa_heap_extract_min(heap, &ext_sched, &ext_prio);
+    TEST_ASSERT(ext_sched.id == 2 && ext_prio == -3, "DSA Min-Heap extract min pops most overdue schedule");
+    dsa_heap_extract_min(heap, &ext_sched, &ext_prio);
+    TEST_ASSERT(ext_sched.id == 1 && ext_prio == 5, "DSA Min-Heap second extraction is next in priority");
+    dsa_heap_destroy(heap);
+
+    /* 4. FIFO Queue Tests */
+    DsaQueue *q = dsa_queue_create();
+    MaintenanceRecord t1 = { .id = 501 };
+    MaintenanceRecord t2 = { .id = 502 };
+    dsa_queue_enqueue(q, &t1);
+    dsa_queue_enqueue(q, &t2);
+    TEST_ASSERT(dsa_queue_size(q) == 2, "DSA Queue size is 2");
+
+    MaintenanceRecord dq_task;
+    dsa_queue_dequeue(q, &dq_task);
+    TEST_ASSERT(dq_task.id == 501, "DSA Queue maintains strict FIFO order (first in is first out)");
+    dsa_queue_dequeue(q, &dq_task);
+    TEST_ASSERT(dq_task.id == 502 && dsa_queue_is_empty(q), "DSA Queue is empty after 2 dequeues");
+    dsa_queue_destroy(q);
+
+    /* 5. LIFO Stack Tests */
+    DsaStack *stk = dsa_stack_create(10);
+    dsa_stack_push(stk, "INSERT", "VEHICLE", 1, "Added MH-01");
+    dsa_stack_push(stk, "UPDATE", "VEHICLE", 1, "Odometer updated");
+    TEST_ASSERT(dsa_stack_size(stk) == 2, "DSA Stack size is 2");
+
+    DsaStackItem popped;
+    dsa_stack_pop(stk, &popped);
+    TEST_ASSERT(strcmp(popped.action, "UPDATE") == 0, "DSA Stack maintains LIFO order (last in is first out)");
+    dsa_stack_pop(stk, &popped);
+    TEST_ASSERT(strcmp(popped.action, "INSERT") == 0 && dsa_stack_is_empty(stk), "DSA Stack empty after pops");
+    dsa_stack_destroy(stk);
+
+    /* 6. Merge Sort Tests */
+    Vehicle sort_arr[4];
+    sort_arr[0] = (Vehicle){ .id = 1, .odometer_km = 40000 };
+    sort_arr[1] = (Vehicle){ .id = 2, .odometer_km = 10000 };
+    sort_arr[2] = (Vehicle){ .id = 3, .odometer_km = 25000 };
+    sort_arr[3] = (Vehicle){ .id = 4, .odometer_km = 18000 };
+
+    dsa_mergesort_vehicles(sort_arr, 0, 3, VEHICLE_SORT_ODOMETER, false); /* ascending */
+    TEST_ASSERT(sort_arr[0].odometer_km == 10000 &&
+                sort_arr[1].odometer_km == 18000 &&
+                sort_arr[2].odometer_km == 25000 &&
+                sort_arr[3].odometer_km == 40000,
+                "DSA Merge Sort correctly orders vehicles by odometer ascending in O(N log N)");
+
+    dsa_mergesort_vehicles(sort_arr, 0, 3, VEHICLE_SORT_ODOMETER, true); /* descending */
+    TEST_ASSERT(sort_arr[0].odometer_km == 40000 && sort_arr[3].odometer_km == 10000,
+                "DSA Merge Sort correctly orders vehicles by odometer descending");
+
+    /* 7. Graph & Dijkstra Shortest Path Tests */
+    DsaGraph *g = dsa_graph_create_sample_fleet_network();
+    TEST_ASSERT(g != NULL && g->num_vertices == 6, "DSA Fleet Graph initialized with 6 nodes");
+    int shortest_dist = 0;
+    int path[DSA_MAX_GRAPH_VERTICES];
+    int path_len = 0;
+    bool has_path = dsa_graph_dijkstra(g, 0, 3, &shortest_dist, path, &path_len);
+    TEST_ASSERT(has_path && shortest_dist == 26 && path_len >= 3,
+                "DSA Dijkstra computes correct shortest path distance (26 km from Depot to East Cargo)");
+    dsa_graph_destroy(g);
+
+    /* 8. Dynamic Programming: 0-1 Knapsack Fleet Budget Allocation */
+    DsaMaintenanceJob jobs[4] = {
+        { .id = 1, .cost_units = 15, .criticality_score = 40 },
+        { .id = 2, .cost_units = 10, .criticality_score = 30 },
+        { .id = 3, .cost_units = 20, .criticality_score = 50 },
+        { .id = 4, .cost_units = 25, .criticality_score = 70 }
+    };
+    int selected_idx[4];
+    int sel_cnt = 0;
+    int max_score = dsa_dp_knapsack_maintenance(jobs, 4, 30, selected_idx, &sel_cnt);
+    TEST_ASSERT(max_score == 80 && sel_cnt == 2,
+                "DSA DP Knapsack correctly optimizes fleet maintenance safety under budget");
+
+    /* 9. Branch and Bound: Traveling Salesperson Dispatch Tour */
+    int tsp_matrix[DSA_TSP_MAX][DSA_TSP_MAX] = {
+        {  0, 10, 15, 20 },
+        { 10,  0, 35, 25 },
+        { 15, 35,  0, 30 },
+        { 20, 25, 30,  0 }
+    };
+    int best_tour[DSA_TSP_MAX + 1];
+    int min_tour_cost = dsa_tsp_branch_and_bound(tsp_matrix, 4, best_tour);
+    TEST_ASSERT(min_tour_cost == 80 && best_tour[0] == 0 && best_tour[4] == 0,
+                "DSA Branch & Bound TSP finds optimal inspection circuit cost (80 km)");
 }
 
 /* ==================== MAIN TEST ENTRY POINT ==================== */
@@ -606,6 +894,7 @@ int main(void) {
     run_expense_tests();
     run_report_tests();
     run_backup_and_audit_tests();
+    run_dsa_tests();
 
     teardown_test_db();
 

@@ -412,7 +412,11 @@ StatusCode schedule_evaluate_all(int *out_updated_count, int *out_notification_c
         }
 
         if (notif_type) {
-            if (str_is_blank(scheduled_at)) scheduled_at = today;
+            char odom_buf[32];
+            if (str_is_blank(scheduled_at)) {
+                snprintf(odom_buf, sizeof(odom_buf), "ODOM:%d", s->due_odometer_km);
+                scheduled_at = odom_buf;
+            }
             if (notification_create(s->id, notif_type, scheduled_at, NULL) == STATUS_OK) {
                 notif_count++;
             }

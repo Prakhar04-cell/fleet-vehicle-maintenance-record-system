@@ -371,6 +371,59 @@ StatusCode vehicle_restore(int vehicle_id, int user_id) {
     return STATUS_OK;
 }
 
+StatusCode vehicle_delete(int vehicle_id, int user_id) {
+    if (vehicle_id <= 0) return STATUS_INVALID_INPUT;
+    sqlite3 *db = db_get_handle();
+    if (!db) return STATUS_DB_ERROR;
+
+    Vehicle v;
+    StatusCode sc = vehicle_get_by_id(vehicle_id, &v);
+    if (sc != STATUS_OK) return sc;
+
+    /* Check if vehicle has dependent maintenance records or expenses */
+    const char *check_sql = 
+        "SELECT "
+        "  (SELECT COUNT(*) FROM maintenance_records WHERE vehicle_id = ?) + "
+        "  (SELECT COUNT(*) FROM expenses WHERE vehicle_id = ?) + "
+        "  (SELECT COUNT(*) FROM maintenance_schedules WHERE vehicle_id = ?);";
+
+    sqlite3_stmt *stmt = NULL;
+    int related_count = 0;
+    if (sqlite3_prepare_v2(db, check_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, vehicle_id);
+        sqlite3_bind_int(stmt, 2, vehicle_id);
+        sqlite3_bind_int(stmt, 3, vehicle_id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            related_count = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (related_count > 0) {
+        fprintf(stderr, "Error: Cannot delete vehicle %s: %d dependent maintenance/expense records exist. Archive the vehicle instead.\n",
+                v.registration_number, related_count);
+        return STATUS_FORBIDDEN;
+    }
+
+    const char *del_sql = "DELETE FROM vehicles WHERE id = ?;";
+    if (sqlite3_prepare_v2(db, del_sql, -1, &stmt, NULL) != SQLITE_OK) return STATUS_DB_ERROR;
+    sqlite3_bind_int(stmt, 1, vehicle_id);
+
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc == SQLITE_CONSTRAINT) {
+        return STATUS_FORBIDDEN;
+    }
+    if (rc != SQLITE_DONE) return STATUS_DB_ERROR;
+
+    char details[MAX_BUFFER_MD];
+    snprintf(details, sizeof(details), "Permanently deleted vehicle %s (ID: %d)", v.registration_number, vehicle_id);
+    audit_log_action(user_id, "VEHICLE_DELETE", "vehicles", vehicle_id, details);
+
+    return STATUS_OK;
+}
+
 StatusCode vehicle_list(const VehicleFilterOptions *options, Vehicle **out_vehicles, int *out_count) {
     if (!out_vehicles || !out_count) return STATUS_INVALID_INPUT;
     *out_vehicles = NULL;

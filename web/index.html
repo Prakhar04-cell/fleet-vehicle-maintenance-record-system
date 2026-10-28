@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FleetIQ — Enterprise Fleet Vehicle Maintenance System</title>
+    <link rel="stylesheet" href="dashboard.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Persistent Collapsible Sidebar -->
+        <aside class="sidebar" id="app-sidebar">
+            <div class="brand-header">
+                <a href="#" class="brand-identity" data-tab-trigger="dashboard">
+                    <div class="brand-logo">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="1" y="3" width="15" height="13"></rect>
+                            <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                            <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                            <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                        </svg>
+                    </div>
+                    <div class="brand-text">
+                        <div class="brand-title">
+                            FleetIQ <span class="badge-engine">C11</span>
+                        </div>
+                        <span class="brand-subtitle">SQLite Persistent Engine</span>
+                    </div>
+                </a>
+                <button class="sidebar-collapse-btn" id="btn-toggle-sidebar" title="Toggle Navigation Sidebar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+            </div>
+
+            <div class="sidebar-scrollable">
+                <div class="nav-group-title">Overview</div>
+                <nav class="nav-menu">
+                    <button class="nav-item active" data-tab="dashboard" data-roles="admin,manager,staff">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                        <span>Dashboard</span>
+                    </button>
+                    <button class="nav-item" data-tab="vehicles" data-roles="admin,manager,staff">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1 .4-1 1v7c0 .6.4 1 1 1h2"></path><circle cx="7" cy="17" r="2"></circle><path d="M9 17h6"></path><circle cx="17" cy="17" r="2"></circle></svg>
+                        <span>Vehicles Register</span>
+                        <span class="nav-badge" id="nav-badge-vehicles">0</span>
+                    </button>
+                    <button class="nav-item" data-tab="drivers" data-roles="admin,manager">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                        <span>Commercial Drivers</span>
+                        <span class="nav-badge" id="nav-badge-drivers">0</span>
+                    </button>
+                </nav>
+
+                <div class="nav-group-title" data-roles="admin,manager,staff">Maintenance & Assets</div>
+                <nav class="nav-menu" data-roles="admin,manager,staff">
+                    <button class="nav-item" data-tab="maintenance" data-roles="admin,manager,staff">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                        <span>Service History</span>
+                    </button>
+                    <button class="nav-item" data-tab="schedules" data-roles="admin,manager,staff">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        <span>Preventive Schedules</span>
+                    </button>
+                    <button class="nav-item" data-tab="reminders" data-roles="admin,manager,staff">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                        <span>Overdue Reminders</span>
+                        <span class="nav-badge danger" id="nav-badge-overdue">0</span>
+                    </button>
+                </nav>
+
+                <div class="nav-group-title" data-roles="admin,manager">Financials & Insights</div>
+                <nav class="nav-menu" data-roles="admin,manager">
+                    <button class="nav-item" data-tab="expenses" data-roles="admin,manager">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                        <span>Operating Expenses</span>
+                    </button>
+                    <button class="nav-item" data-tab="reports" data-roles="admin,manager">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                        <span>Reports & Analytics</span>
+                    </button>
+                </nav>
+
+                <div class="nav-group-title" data-roles="admin">System & Security</div>
+                <nav class="nav-menu" data-roles="admin">
+                    <button class="nav-item" data-tab="dsa" data-roles="admin">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                        <span>DSA Algorithms</span>
+                    </button>
+                    <button class="nav-item" data-tab="audit" data-roles="admin">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                        <span>Audit Trail</span>
+                    </button>
+                    <button class="nav-item" data-tab="backup" data-roles="admin">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+                        <span>Disaster Recovery</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="system-status-card">
+                    <div class="status-indicator-dot"></div>
+                    <div class="status-info">
+                        <span class="status-label">SQLite WAL Active</span>
+                        <span class="status-sub">Zero-Lag Memory Bus</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Wrapper -->
+        <div class="main-wrapper">
+            <!-- Top Header -->
+            <header class="top-header">
+                <div class="header-left">
+                    <button class="sidebar-collapse-btn mobile-only" id="btn-mobile-menu">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <div class="header-breadcrumb">
+                        <a href="#" data-tab-trigger="dashboard">FleetIQ</a>
+                        <span class="separator">/</span>
+                        <span class="active-crumb" id="breadcrumb-current">Dashboard</span>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <div class="header-search">
+                        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="global-search-input" placeholder="Search vehicles, drivers..." />
+                        <span class="search-kbd">/</span>
+                    </div>
+
+                    <div class="header-actions">
+                        <!-- Notification Bell & Flyout -->
+                        <div class="notification-menu-wrapper">
+                            <button class="btn btn-secondary btn-icon" id="btn-notifications-toggle" title="View System Alerts">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                            </button>
+                            <span class="nav-badge danger hidden" id="header-notif-badge" style="position: absolute; top: -4px; right: -4px; font-size: 10px; padding: 1px 5px;">0</span>
+
+                            <div class="notification-flyout" id="notification-flyout">
+                                <div class="notification-flyout-header">
+                                    <span class="notification-flyout-title">Active Fleet Notifications</span>
+                                    <span class="badge badge-info" id="flyout-count">0 alerts</span>
+                                </div>
+                                <div class="notification-flyout-body" id="flyout-notification-list">
+                                    <div class="text-center py-4 text-muted text-sm">No active alerts.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-secondary btn-sm" id="btn-refresh-data" title="Refresh Live State from SQLite">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                            <span>Refresh</span>
+                        </button>
+
+                        <button class="btn btn-outline btn-sm" id="btn-evaluate-thresholds" title="Evaluate Preventive Maintenance Schedules">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            <span>Evaluate</span>
+                        </button>
+
+                        <button class="btn btn-primary btn-sm" id="btn-quick-backup" data-roles="admin" title="Run Online Hot Backup via SQLite Backup API">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                            <span>Hot Backup</span>
+                        </button>
+
+                        <!-- User Profile Pill -->
+                        <div class="user-profile-pill" id="user-profile-btn" style="cursor: pointer;" title="Click to Switch User / Login">
+                            <div class="user-avatar" id="header-user-avatar">AD</div>
+                            <div class="user-details">
+                                <span class="user-name" id="header-user-name">admin</span>
+                                <span class="user-role" id="header-user-role">Role: Administrator</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Content Container -->
+            <main class="main-content">
+                <!-- Live In-App Alerts Banner -->
+                <div id="alert-banner" class="alert-banner hidden"></div>
+
+                <!-- ==================================================== -->
+                <!-- TAB 1: OPERATIONAL DASHBOARD -->
+                <!-- ==================================================== -->                <section id="tab-dashboard" class="tab-pane active">
+                    <!-- ========================================== -->
+                    <!-- ROLE DASHBOARD 1: ADMINISTRATOR            -->
+                    <!-- ========================================== -->
+                    <div id="dashboard-view-admin" class="role-dashboard-view">
+                        <!-- Role Header Banner -->
+                        <div class="role-header-banner">
+                            <div>
+                                <h2 class="role-header-title">System Overview</h2>
+                                <p class="role-header-sub">System-wide fleet telemetry, infrastructure status, security controls, and governance.</p>
+                            </div>
+                            <span class="role-pill role-pill-admin"><span class="role-pill-dot"></span>Administrator — Full Control</span>
+                        </div>
+
+                        <!-- Top KPI Cards Row (7 Key Fleet Metrics) -->
+                        <div class="kpi-grid">
+                            <div class="kpi-card kpi-primary">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Total Fleet</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value" id="kpi-total-vehicles">0</div>
+                                <div class="kpi-sub">Commercial Registered Assets</div>
+                            </div>
+
+                            <div class="kpi-card kpi-success">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Active / Available</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value success" id="kpi-avail-vehicles">0</div>
+                                <div class="kpi-sub"><span id="kpi-on-trip">0 on trips</span> &bull; ready</div>
+                            </div>
+
+                            <div class="kpi-card kpi-primary">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">In Maintenance</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value" id="kpi-under-maint">0</div>
+                                <div class="kpi-sub">Undergoing active workshop repair</div>
+                            </div>
+
+                            <div class="kpi-card kpi-danger">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Out of Service</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value danger" id="kpi-out-of-service">0</div>
+                                <div class="kpi-sub">Decommissioned or grounded</div>
+                            </div>
+
+                            <div class="kpi-card kpi-danger">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Overdue Services</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value danger" id="kpi-overdue">0</div>
+                                <div class="kpi-sub">Exceeded date or odometer limits</div>
+                            </div>
+
+                            <div class="kpi-card kpi-warning">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Upcoming Due</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value warning" id="kpi-upcoming">0</div>
+                                <div class="kpi-sub">Approaching threshold (7 days)</div>
+                            </div>
+
+                            <div class="kpi-card kpi-purple">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Total Spend</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value" id="kpi-total-spend">Rs. 0</div>
+                                <div class="kpi-sub" id="kpi-month-spend">This month: Rs. 0</div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions Bar -->
+                        <div class="quick-actions-bar">
+                            <div class="quick-actions-label">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                <span>Administrative Operations:</span>
+                            </div>
+                            <div class="quick-actions-btns">
+                                <button class="btn btn-primary btn-sm" id="btn-quick-add-vehicle">+ Add Vehicle</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-quick-log-service">+ Record Maintenance</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-quick-add-expense">+ Add Expense</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-quick-add-schedule">+ Create Schedule</button>
+                                <button class="btn btn-outline btn-sm" id="btn-quick-export">Export Fleet CSV</button>
+                            </div>
+                        </div>
+
+                        <!-- Analytics Section: 3 Custom Responsive SVG Charts -->
+                        <div class="analytics-grid">
+                            <div class="card analytics-col-4">
+                                <div class="card-header">
+                                    <h3>Fleet Status Distribution</h3>
+                                    <span class="badge badge-muted">Live SQLite</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="chart-container" id="chart-fleet-donut"></div>
+                                    <div class="donut-legend" id="donut-legend-container"></div>
+                                </div>
+                            </div>
+
+                            <div class="card analytics-col-8">
+                                <div class="card-header">
+                                    <h3>Monthly Maintenance Spending Trend</h3>
+                                    <span class="badge badge-info">Financials (Rs.)</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="chart-container" id="chart-monthly-bars"></div>
+                                </div>
+                            </div>
+
+                            <div class="card analytics-col-12">
+                                <div class="card-header">
+                                    <h3>Expenditure Breakdown by Operational Category</h3>
+                                    <span class="badge badge-muted">Current Fiscal Year</span>
+                                </div>
+                                <div class="card-body" id="category-progress-container"></div>
+                            </div>
+                        </div>
+
+                        <!-- Feeds Grid: Urgent Reminders + Security Audit + Engine Health -->
+                        <div class="analytics-grid">
+                            <div class="card analytics-col-7">
+                                <div class="card-header">
+                                    <h3>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-danger"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                        Urgent Maintenance Reminders
+                                    </h3>
+                                    <button class="btn btn-outline btn-sm" data-tab-trigger="schedules">View All</button>
+                                </div>
+                                <div class="card-body-flush">
+                                    <div class="table-responsive">
+                                        <table class="data-table" id="table-urgent-schedules">
+                                            <thead>
+                                                <tr>
+                                                    <th>Vehicle</th>
+                                                    <th>Service Milestone</th>
+                                                    <th>Due Date</th>
+                                                    <th>Due Odometer</th>
+                                                    <th>Status</th>
+                                                    <th class="text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td colspan="6" class="text-center text-muted py-4">Checking live maintenance thresholds...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card analytics-col-5">
+                                <div class="card-header">
+                                    <h3>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-primary"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                        Recent Security Audit Events
+                                    </h3>
+                                    <button class="btn btn-outline btn-sm" data-tab-trigger="audit">Full Trail</button>
+                                </div>
+                                <div class="card-body-flush">
+                                    <div class="table-responsive">
+                                        <table class="data-table" id="table-admin-recent-audit">
+                                            <thead>
+                                                <tr>
+                                                    <th>Time</th>
+                                                    <th>User</th>
+                                                    <th>Action</th>
+                                                    <th>Details</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td colspan="4" class="text-center text-muted py-3">Loading security audit trail...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ========================================== -->
+                    <!-- ROLE DASHBOARD 2: FLEET MANAGER            -->
+                    <!-- ========================================== -->
+                    <div id="dashboard-view-manager" class="role-dashboard-view hidden">
+                        <!-- Role Header Banner -->
+                        <div class="role-header-banner">
+                            <div>
+                                <h2 class="role-header-title">Fleet Operations</h2>
+                                <p class="role-header-sub">Operational dispatch, driver allocations, maintenance schedules, and operating costs.</p>
+                            </div>
+                            <span class="role-pill role-pill-manager"><span class="role-pill-dot"></span>Fleet Manager — Operations</span>
+                        </div>
+
+                        <!-- 6 Focused Operational KPI Cards -->
+                        <div class="kpi-grid">
+                            <div class="kpi-card kpi-primary">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Commercial Fleet</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value" id="kpi-mgr-total">0</div>
+                                <div class="kpi-sub">Total Active Commercial Assets</div>
+                            </div>
+
+                            <div class="kpi-card kpi-success">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Available for Dispatch</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value success" id="kpi-mgr-avail">0</div>
+                                <div class="kpi-sub"><span id="kpi-mgr-on-trip">0 on trips</span> &bull; ready</div>
+                            </div>
+
+                            <div class="kpi-card kpi-primary">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Workshop Service</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value" id="kpi-mgr-maint">0</div>
+                                <div class="kpi-sub">Vehicles undergoing maintenance</div>
+                            </div>
+
+                            <div class="kpi-card kpi-danger">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Overdue Alerts</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value danger" id="kpi-mgr-overdue">0</div>
+                                <div class="kpi-sub">Requires immediate service dispatch</div>
+                            </div>
+
+                            <div class="kpi-card kpi-warning">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Upcoming Milestones</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value warning" id="kpi-mgr-upcoming">0</div>
+                                <div class="kpi-sub">Due within 7 days / 500 km</div>
+                            </div>
+
+                            <div class="kpi-card kpi-purple">
+                                <div class="kpi-header">
+                                    <span class="kpi-label">Month Spending</span>
+                                    <div class="kpi-icon-wrap">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                                    </div>
+                                </div>
+                                <div class="kpi-value" id="kpi-mgr-spend">Rs. 0</div>
+                                <div class="kpi-sub">Operational & service costs</div>
+                            </div>
+                        </div>
+
+                        <!-- Operational Quick Actions Bar -->
+                        <div class="quick-actions-bar">
+                            <div class="quick-actions-label">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                <span>Operations Quick Actions:</span>
+                            </div>
+                            <div class="quick-actions-btns">
+                                <button class="btn btn-primary btn-sm" id="btn-mgr-add-vehicle">+ Register Vehicle</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-mgr-log-service">+ Record Maintenance</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-mgr-add-expense">+ Add Expense</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-mgr-add-schedule">+ Schedule Service</button>
+                                <button class="btn btn-outline btn-sm" id="btn-mgr-export">Export Fleet CSV</button>
+                            </div>
+                        </div>
+
+                        <!-- Operational Focus Grid: Allocation Roster & Urgent Alerts -->
+                        <div class="analytics-grid">
+                            <!-- Left: Commercial Driver & Vehicle Allocation Roster -->
+                            <div class="card analytics-col-8">
+                                <div class="card-header">
+                                    <h3>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-primary"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                                        Commercial Driver & Vehicle Allocation Roster
+                                    </h3>
+                                    <button class="btn btn-outline btn-sm" data-tab-trigger="drivers">Manage Drivers</button>
+                                </div>
+                                <div class="card-body-flush">
+                                    <div class="table-responsive">
+                                        <table class="data-table" id="table-mgr-allocations">
+                                            <thead>
+                                                <tr>
+                                                    <th>Driver Name</th>
+                                                    <th>Commercial License</th>
+                                                    <th>Assigned Vehicle</th>
+                                                    <th>License Expiry</th>
+                                                    <th>Readiness</th>
+                                                    <th class="text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td colspan="6" class="text-center text-muted py-4">Loading operational allocation roster...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right: Urgent Maintenance Attention -->
+                            <div class="card analytics-col-4">
+                                <div class="card-header">
+                                    <h3>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-danger"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                        Actionable Overdue Alerts
+                                    </h3>
+                                    <button class="btn btn-outline btn-sm" data-tab-trigger="reminders">Reminders</button>
+                                </div>
+                                <div class="card-body-flush">
+                                    <div class="table-responsive">
+                                        <table class="data-table" id="table-mgr-urgent-schedules">
+                                            <thead>
+                                                <tr>
+                                                    <th>Vehicle</th>
+                                                    <th>Milestone</th>
+                                                    <th>Due</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td colspan="4" class="text-center text-muted py-4">Checking active alerts...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ========================================== -->
+                    <!-- ROLE DASHBOARD 3: MAINTENANCE STAFF        -->
+                    <!-- ========================================== -->
+                    <div id="dashboard-view-staff" class="role-dashboard-view hidden">
+                        <!-- Role Header Banner -->
+                        <div class="role-header-banner">
+                            <div>
+                                <h2 class="role-header-title">Maintenance Workspace</h2>
+                                <p class="role-header-sub">Workshop service bay, pending work orders, schedule completions, and vehicle inspections.</p>
+                            </div>
+                            <span class="role-pill role-pill-staff"><span class="role-pill-dot"></span>Maintenance Staff — Service Bay</span>
+                        </div>
+
+                        <!-- Workshop Service Workload Hero Card -->
+                        <div class="workshop-hero-card">
+                            <div class="workshop-hero-header">
+                                <div>
+                                    <h3>Workshop Service Workload & Job Queue</h3>
+                                    <p>Real-time vehicle maintenance tickets and preventative inspection tasks awaiting workshop action.</p>
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="btn btn-primary btn-sm" id="btn-staff-quick-service" style="background: #2563EB; color: #fff;">+ Record Service</button>
+                                    <button class="btn btn-outline btn-sm" id="btn-staff-quick-schedule" style="color: #fff; border-color: rgba(255,255,255,0.4);">+ Add Schedule</button>
+                                </div>
+                            </div>
+                            <div class="workshop-kpis">
+                                <div class="workshop-kpi-item">
+                                    <div class="workshop-kpi-val danger" id="kpi-staff-bay">0</div>
+                                    <div class="workshop-kpi-lbl">Vehicles In Bay</div>
+                                </div>
+                                <div class="workshop-kpi-item">
+                                    <div class="workshop-kpi-val danger" id="kpi-staff-overdue">0</div>
+                                    <div class="workshop-kpi-lbl">Overdue Services</div>
+                                </div>
+                                <div class="workshop-kpi-item">
+                                    <div class="workshop-kpi-val warning" id="kpi-staff-upcoming">0</div>
+                                    <div class="workshop-kpi-lbl">Due Soon (7 Days)</div>
+                                </div>
+                                <div class="workshop-kpi-item">
+                                    <div class="workshop-kpi-val success" id="kpi-staff-completed">0</div>
+                                    <div class="workshop-kpi-lbl">Completed Records</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Workshop Workspace Grid: Actionable Work Orders & Service Bays -->
+                        <div class="analytics-grid">
+                            <!-- Left (Col-8): Actionable Preventive Schedules -->
+                            <div class="card analytics-col-8">
+                                <div class="card-header">
+                                    <h3>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-primary"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                                        Pending & Scheduled Work Orders
+                                    </h3>
+                                    <button class="btn btn-outline btn-sm" data-tab-trigger="schedules">View All Schedules</button>
+                                </div>
+                                <div class="card-body-flush">
+                                    <div class="table-responsive">
+                                        <table class="data-table" id="table-staff-schedules">
+                                            <thead>
+                                                <tr>
+                                                    <th>Vehicle Reg</th>
+                                                    <th>Service Milestone</th>
+                                                    <th>Due Date</th>
+                                                    <th>Due Odometer</th>
+                                                    <th>Status</th>
+                                                    <th class="text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr><td colspan="6" class="text-center text-muted py-4">Loading workshop job queue...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right (Col-4): Vehicles Currently in Service Bay & History -->
+                            <div class="card analytics-col-4">
+                                <div class="card-header">
+                                    <h3>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-warning"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                                        Active Workshop Bays
+                                    </h3>
+                                    <span class="badge badge-warning" id="staff-bay-badge">0 vehicles</span>
+                                </div>
+                                <div class="card-body" id="staff-bay-queue" style="padding: 0;">
+                                    <div class="text-center text-muted py-4">No vehicles currently in service bay.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Bottom: Recent Completed Services by Staff -->
+                        <div class="card" style="margin-top: 20px;">
+                            <div class="card-header">
+                                <h3>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-success"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                    Recent Service History Log
+                                </h3>
+                                <button class="btn btn-outline btn-sm" data-tab-trigger="maintenance">View Full History</button>
+                            </div>
+                            <div class="card-body-flush">
+                                <div class="table-responsive">
+                                    <table class="data-table" id="table-staff-recent-maint">
+                                        <thead>
+                                            <tr>
+                                                <th>Service Date</th>
+                                                <th>Vehicle</th>
+                                                <th>Service Performed</th>
+                                                <th>Odometer</th>
+                                                <th>Workshop</th>
+                                                <th>Work Order Notes</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr><td colspan="6" class="text-center text-muted py-3">Loading completed service history...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+
+                <!-- ==================================================== -->
+                <!-- TAB 2: VEHICLES MANAGEMENT REGISTER -->
+                <!-- ==================================================== -->
+                <section id="tab-vehicles" class="tab-pane">
+                    <div class="card">
+                        <!-- Toolbar with Search, Status Filter, Fuel Filter, Column Picker, Add Button -->
+                        <div class="table-toolbar">
+                            <div class="toolbar-left">
+                                <div class="filter-input-wrap">
+                                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <input type="text" id="vehicle-search-input" placeholder="Search registration, make, model..." />
+                                </div>
+                                <select class="select-filter" id="vehicle-filter-status">
+                                    <option value="">All Statuses</option>
+                                    <option value="Available">Available</option>
+                                    <option value="On Trip">On Trip</option>
+                                    <option value="Maintenance">In Maintenance</option>
+                                    <option value="Out of Service">Out of Service</option>
+                                </select>
+                                <select class="select-filter" id="vehicle-filter-fuel">
+                                    <option value="">All Fuel Types</option>
+                                    <option value="Diesel">Diesel</option>
+                                    <option value="Petrol">Petrol</option>
+                                    <option value="CNG">CNG</option>
+                                    <option value="Electric">Electric</option>
+                                </select>
+                                <button class="btn btn-secondary btn-sm" id="btn-clear-vehicle-filters" title="Reset Filters">Clear</button>
+                            </div>
+
+                            <div class="toolbar-right">
+                                <!-- Column Visibility Picker -->
+                                <div class="column-picker-dropdown">
+                                    <button class="btn btn-secondary btn-sm" id="btn-column-picker-toggle">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                                        <span>Columns</span>
+                                    </button>
+                                    <div class="column-picker-menu" id="column-picker-menu">
+                                        <label class="column-picker-item"><input type="checkbox" data-col="make" checked> Make & Model</label>
+                                        <label class="column-picker-item"><input type="checkbox" data-col="year" checked> Year & VIN</label>
+                                        <label class="column-picker-item"><input type="checkbox" data-col="fuel" checked> Fuel Gauge</label>
+                                        <label class="column-picker-item"><input type="checkbox" data-col="odometer" checked> Odometer (km)</label>
+                                        <label class="column-picker-item"><input type="checkbox" data-col="driver" checked> Assigned Driver</label>
+                                        <label class="column-picker-item"><input type="checkbox" data-col="insurance" checked> Insurance Expiry</label>
+                                        <label class="column-picker-item"><input type="checkbox" data-col="status" checked> Status</label>
+                                    </div>
+                                </div>
+
+                                <button class="btn btn-secondary btn-sm" id="btn-export-vehicles-csv">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    <span>Export CSV</span>
+                                </button>
+
+                                <button class="btn btn-primary btn-sm" id="btn-add-vehicle-modal">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    <span>Add Vehicle</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Data Table -->
+                        <div class="card-body-flush">
+                            <div class="table-responsive">
+                                <table class="data-table" id="table-vehicles">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 38px;"><input type="checkbox" id="check-all-vehicles"></th>
+                                            <th class="sortable" data-sort="reg">Registration <span class="sort-icon">&#8645;</span></th>
+                                            <th class="sortable col-make" data-sort="make">Make & Model <span class="sort-icon">&#8645;</span></th>
+                                            <th class="sortable col-year" data-sort="year">Year & VIN <span class="sort-icon">&#8645;</span></th>
+                                            <th class="sortable col-fuel" data-sort="fuel">Fuel Level <span class="sort-icon">&#8645;</span></th>
+                                            <th class="sortable col-odometer" data-sort="odometer">Odometer (km) <span class="sort-icon">&#8645;</span></th>
+                                            <th class="col-driver">Assigned Driver</th>
+                                            <th class="col-insurance">Insurance</th>
+                                            <th class="sortable col-status" data-sort="status">Status <span class="sort-icon">&#8645;</span></th>
+                                            <th class="text-right" style="width: 120px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbody-vehicles">
+                                        <tr><td colspan="10" class="text-center text-muted py-4">Loading fleet assets from SQLite...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Pagination Footer -->
+                        <div class="table-pagination">
+                            <div class="pagination-info" id="vehicle-pagination-info">Showing 0-0 of 0 vehicles</div>
+                            <div class="pagination-controls">
+                                <label style="margin-right: 6px;">Rows per page:
+                                    <select id="vehicle-page-size" class="select-filter" style="height: 28px; padding: 0 20px 0 6px;">
+                                        <option value="5">5</option>
+                                        <option value="10" selected>10</option>
+                                        <option value="25">25</option>
+                                    </select>
+                                </label>
+                                <button class="btn btn-secondary btn-sm" id="btn-vehicle-prev" disabled>&larr; Prev</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-vehicle-next" disabled>Next &rarr;</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 3: COMMERCIAL DRIVERS DIRECTORY -->
+                <!-- ==================================================== -->
+                <section id="tab-drivers" class="tab-pane">
+                    <div class="card">
+                        <div class="table-toolbar">
+                            <div class="toolbar-left">
+                                <div class="filter-input-wrap">
+                                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <input type="text" id="driver-search-input" placeholder="Search driver name, license..." />
+                                </div>
+                            </div>
+                            <div class="toolbar-right">
+                                <button class="btn btn-primary btn-sm" id="btn-add-driver-modal">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    <span>Add Driver</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card-body-flush">
+                            <div class="table-responsive">
+                                <table class="data-table" id="table-drivers">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Driver Name</th>
+                                            <th>Phone Number</th>
+                                            <th>License Number</th>
+                                            <th>License Expiry</th>
+                                            <th>Status</th>
+                                            <th class="text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbody-drivers">
+                                        <tr><td colspan="7" class="text-center text-muted py-4">Loading commercial driver directory...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 4: MAINTENANCE SERVICE HISTORY -->
+                <!-- ==================================================== -->
+                <section id="tab-maintenance" class="tab-pane">
+                    <div class="card">
+                        <div class="table-toolbar">
+                            <div class="toolbar-left">
+                                <div class="filter-input-wrap">
+                                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <input type="text" id="maint-search-input" placeholder="Search vehicle reg, workshop, service..." />
+                                </div>
+                            </div>
+                            <div class="toolbar-right">
+                                <button class="btn btn-secondary btn-sm" id="btn-export-maint-csv">Export CSV</button>
+                                <button class="btn btn-primary btn-sm" id="btn-log-service-modal">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    <span>Record Maintenance</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card-body-flush">
+                            <div class="table-responsive">
+                                <table class="data-table" id="table-maintenance">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Vehicle</th>
+                                            <th>Service Type</th>
+                                            <th>Date</th>
+                                            <th>Odometer (km)</th>
+                                            <th>Workshop / Provider</th>
+                                            <th>Work Description</th>
+                                            <th>Total Cost</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbody-maintenance">
+                                        <tr><td colspan="8" class="text-center text-muted py-4">Loading maintenance history...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 5: PREVENTIVE MAINTENANCE SCHEDULES -->
+                <!-- ==================================================== -->
+                <section id="tab-schedules" class="tab-pane">
+                    <div class="card">
+                        <div class="table-toolbar">
+                            <div class="toolbar-left">
+                                <div class="filter-input-wrap">
+                                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <input type="text" id="schedule-search-input" placeholder="Filter schedules..." />
+                                </div>
+                            </div>
+                            <div class="toolbar-right">
+                                <button class="btn btn-primary btn-sm" id="btn-add-schedule-modal">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    <span>Create Schedule</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card-body-flush">
+                            <div class="table-responsive">
+                                <table class="data-table" id="table-all-schedules">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Vehicle</th>
+                                            <th>Service Milestone</th>
+                                            <th>Due Date</th>
+                                            <th>Due Odometer</th>
+                                            <th>Status</th>
+                                            <th>Remaining Window</th>
+                                            <th class="text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbody-schedules">
+                                        <tr><td colspan="8" class="text-center text-muted py-4">Loading preventive schedules...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 6: OVERDUE & DUE-SOON REMINDERS -->
+                <!-- ==================================================== -->
+                <section id="tab-reminders" class="tab-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <h3>Maintenance Reminders & Overdue Thresholds</h3>
+                                <p>Automated alerts evaluated against current vehicle odometers and calendar schedules</p>
+                            </div>
+                            <button class="btn btn-primary btn-sm" id="btn-reminders-evaluate">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                                <span>Re-evaluate Milestones</span>
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="reminders-container">
+                                <div class="text-center text-muted py-4">Loading active reminders...</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 7: OPERATING EXPENSES -->
+                <!-- ==================================================== -->
+                <section id="tab-expenses" class="tab-pane">
+                    <div class="card">
+                        <div class="table-toolbar">
+                            <div class="toolbar-left">
+                                <div class="filter-input-wrap">
+                                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <input type="text" id="expense-search-input" placeholder="Search vehicle, category, desc..." />
+                                </div>
+                            </div>
+                            <div class="toolbar-right">
+                                <button class="btn btn-secondary btn-sm" id="btn-export-expenses-csv">Export CSV</button>
+                                <button class="btn btn-primary btn-sm" id="btn-record-expense-modal">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    <span>Add Expense</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card-body-flush">
+                            <div class="table-responsive">
+                                <table class="data-table" id="table-expenses">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Vehicle</th>
+                                            <th>Category</th>
+                                            <th>Description</th>
+                                            <th>Amount</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbody-expenses">
+                                        <tr><td colspan="6" class="text-center text-muted py-4">Loading expenditure records...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 8: REPORTS & ANALYTICS -->
+                <!-- ==================================================== -->
+                <section id="tab-reports" class="tab-pane">
+                    <div class="analytics-grid">
+                        <div class="card analytics-col-12">
+                            <div class="card-header">
+                                <div>
+                                    <h3>Fleet Reports & One-Click Exports</h3>
+                                    <p>Compliant CSV and PDF reports generated from real SQLite database tables</p>
+                                </div>
+                                <button class="btn btn-secondary btn-sm" onclick="window.print()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                                    <span>Print Dashboard Report</span>
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div class="dsa-grid">
+                                    <!-- PDF Reports -->
+                                    <div class="dsa-card" style="border-top: 3px solid #2563EB;">
+                                        <div class="dsa-header">
+                                            <h4>Fleet Executive Summary</h4>
+                                            <span class="badge badge-primary">PDF %PDF-1.4</span>
+                                        </div>
+                                        <p class="dsa-desc">Formal executive report with active fleet count, financial expenditure totals, overdue services, and vehicle readiness breakdown.</p>
+                                        <button class="btn btn-primary btn-sm" id="btn-rep-fleet-pdf">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                            <span>Generate Fleet Summary PDF</span>
+                                        </button>
+                                    </div>
+
+                                    <div class="dsa-card" style="border-top: 3px solid #2563EB;">
+                                        <div class="dsa-header">
+                                            <h4>Operating Expenses Ledger</h4>
+                                            <span class="badge badge-primary">PDF %PDF-1.4</span>
+                                        </div>
+                                        <p class="dsa-desc">Financial audit statement itemizing fuel, tolls, insurance, and maintenance expenses per registration with cost centers.</p>
+                                        <button class="btn btn-primary btn-sm" id="btn-rep-expenses-pdf">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                            <span>Generate Expenses PDF</span>
+                                        </button>
+                                    </div>
+
+                                    <div class="dsa-card" style="border-top: 3px solid #2563EB;">
+                                        <div class="dsa-header">
+                                            <h4>Vehicle Maintenance Dossier</h4>
+                                            <span class="badge badge-primary">PDF %PDF-1.4</span>
+                                        </div>
+                                        <p class="dsa-desc">Complete vehicle maintenance passport showing odometer history, part replacements, and technician sign-offs.</p>
+                                        <button class="btn btn-primary btn-sm" id="btn-rep-maint-pdf">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                            <span>Generate Maintenance PDF</span>
+                                        </button>
+                                    </div>
+
+                                    <!-- CSV Reports -->
+                                    <div class="dsa-card">
+                                        <div class="dsa-header">
+                                            <h4>Vehicles Master Register</h4>
+                                            <span class="badge badge-info">CSV RFC 4180</span>
+                                        </div>
+                                        <p class="dsa-desc">Complete export of all commercial vehicles, odometers, driver allocations, VINs, and insurance dates.</p>
+                                        <button class="btn btn-outline btn-sm" id="btn-rep-vehicles">Download Vehicles CSV</button>
+                                    </div>
+
+                                    <div class="dsa-card">
+                                        <div class="dsa-header">
+                                            <h4>Service & Maintenance Logs</h4>
+                                            <span class="badge badge-info">CSV RFC 4180</span>
+                                        </div>
+                                        <p class="dsa-desc">Itemized audit of all maintenance services including parts cost, labour, taxes, and workshop providers.</p>
+                                        <button class="btn btn-outline btn-sm" id="btn-rep-maint">Download Maintenance CSV</button>
+                                    </div>
+
+                                    <div class="dsa-card">
+                                        <div class="dsa-header">
+                                            <h4>Operating Expenditures</h4>
+                                            <span class="badge badge-info">CSV RFC 4180</span>
+                                        </div>
+                                        <p class="dsa-desc">Ledger of all fuel, toll, parts, and maintenance expenses aggregated by vehicle registration.</p>
+                                        <button class="btn btn-outline btn-sm" id="btn-rep-expenses">Download Expenses CSV</button>
+                                    </div>
+
+                                    <div class="dsa-card">
+                                        <div class="dsa-header">
+                                            <h4>Preventive Milestones</h4>
+                                            <span class="badge badge-info">CSV RFC 4180</span>
+                                        </div>
+                                        <p class="dsa-desc">Threshold tracking report with overdue status, remaining distance, and scheduled maintenance dates.</p>
+                                        <button class="btn btn-outline btn-sm" id="btn-rep-schedules">Download Schedules CSV</button>
+                                    </div>
+
+                                    <div class="dsa-card">
+                                        <div class="dsa-header">
+                                            <h4>Monthly Spending Trends</h4>
+                                            <span class="badge badge-info">CSV RFC 4180</span>
+                                        </div>
+                                        <p class="dsa-desc">Chronological monthly financial summaries grouped by calendar year and operating cost center.</p>
+                                        <button class="btn btn-outline btn-sm" id="btn-rep-spending-csv">Download Spending CSV</button>
+                                    </div>
+
+                                    <div class="dsa-card">
+                                        <div class="dsa-header">
+                                            <h4>Vehicle Lifetime Costs</h4>
+                                            <span class="badge badge-info">CSV RFC 4180</span>
+                                        </div>
+                                        <p class="dsa-desc">Aggregate TCO metrics comparing maintenance expenditure against operational fuel and toll expenditures.</p>
+                                        <button class="btn btn-outline btn-sm" id="btn-rep-cost-csv">Download Lifetime Costs CSV</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 9: DSA ACADEMIC VISUALIZER SUITE -->
+                <!-- ==================================================== -->
+                <section id="tab-dsa" class="tab-pane">
+                    <div class="card">
+                        <div class="card-header flex-between">
+                            <div>
+                                <h3>Academic C11 DSA Optimization Suite</h3>
+                                <p>Live benchmark execution of data structures and algorithms directly in pure C11 memory</p>
+                            </div>
+                            <button class="btn btn-primary" id="btn-run-dsa-benchmarks">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                <span>Execute Live C Benchmarks</span>
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="dsa-grid">
+                                <div class="dsa-card">
+                                    <div class="dsa-header">
+                                        <h4>1. Hash Table (DJB2)</h4>
+                                        <span class="badge badge-success">O(1) Average</span>
+                                    </div>
+                                    <p class="dsa-desc">Vehicle registration index using dynamic chaining collision resolution and load factor auto-rehashing.</p>
+                                    <div class="dsa-metric-box">
+                                        <div class="dsa-metric-label">Status & Index Capacity</div>
+                                        <div class="dsa-metric-val" id="dsa-ht-metric">Indexed: - vehicles</div>
+                                    </div>
+                                </div>
+
+                                <div class="dsa-card">
+                                    <div class="dsa-header">
+                                        <h4>2. Binary Search Tree (BST)</h4>
+                                        <span class="badge badge-success">O(log N) Range</span>
+                                    </div>
+                                    <p class="dsa-desc">Odometer-ordered binary tree with inorder traversal supporting arbitrary telemetry range queries [20k - 50k km].</p>
+                                    <div class="dsa-metric-box">
+                                        <div class="dsa-metric-label">Range Lookup Telemetry</div>
+                                        <div class="dsa-metric-val">Bounds: Active [O(log N)]</div>
+                                    </div>
+                                </div>
+
+                                <div class="dsa-card">
+                                    <div class="dsa-header">
+                                        <h4>3. Min-Heap Priority Queue</h4>
+                                        <span class="badge badge-success">O(1) Peek / O(log N)</span>
+                                    </div>
+                                    <p class="dsa-desc">Complete binary tree structuring upcoming and overdue maintenance milestones strictly by critical urgency.</p>
+                                    <div class="dsa-metric-box">
+                                        <div class="dsa-metric-label">Priority Order</div>
+                                        <div class="dsa-metric-val">Root: Overdue Critical First</div>
+                                    </div>
+                                </div>
+
+                                <div class="dsa-card">
+                                    <div class="dsa-header">
+                                        <h4>4. Graph & Dijkstra Routing</h4>
+                                        <span class="badge badge-success">O((V+E) log V)</span>
+                                    </div>
+                                    <p class="dsa-desc">Shortest logistics routing between Central Depot, West Freight Hub, and East Cargo Terminal.</p>
+                                    <div class="dsa-metric-box">
+                                        <div class="dsa-metric-label">Shortest Route Computed</div>
+                                        <div class="dsa-metric-val" id="dsa-dijkstra-metric">Route: -</div>
+                                    </div>
+                                </div>
+
+                                <div class="dsa-card">
+                                    <div class="dsa-header">
+                                        <h4>5. Dynamic Programming (0-1 Knapsack)</h4>
+                                        <span class="badge badge-success">O(N * B) Pseudo-poly</span>
+                                    </div>
+                                    <p class="dsa-desc">Maximizes cumulative fleet safety and reliability score under a Rs. 18,000 quarterly budget ceiling.</p>
+                                    <div class="dsa-metric-box">
+                                        <div class="dsa-metric-label">Optimal Reliability Score</div>
+                                        <div class="dsa-metric-val" id="dsa-knapsack-metric">Max Score: - pts</div>
+                                    </div>
+                                </div>
+
+                                <div class="dsa-card">
+                                    <div class="dsa-header">
+                                        <h4>6. Branch & Bound (TSP Tour)</h4>
+                                        <span class="badge badge-success">O(N!) B&B Pruned</span>
+                                    </div>
+                                    <p class="dsa-desc">Computes minimal Hamiltonian inspection circuit for mobile technicians visiting multiple hubs.</p>
+                                    <div class="dsa-metric-box">
+                                        <div class="dsa-metric-label">Minimal Circuit Distance</div>
+                                        <div class="dsa-metric-val" id="dsa-tsp-metric">Optimal Tour: - km</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 10: AUDIT HISTORY -->
+                <!-- ==================================================== -->
+                <section id="tab-audit" class="tab-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <h3>Immutable System Audit History</h3>
+                                <p>Tamper-evident activity ledger logging all vehicle edits, driver reassignments, and maintenance records</p>
+                            </div>
+                            <button class="btn btn-secondary btn-sm" id="btn-refresh-audit">Refresh Audit Logs</button>
+                        </div>
+                        <div class="card-body-flush">
+                            <div class="table-responsive">
+                                <table class="data-table" id="table-audit">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Timestamp</th>
+                                            <th>Operator</th>
+                                            <th>Action Type</th>
+                                            <th>Entity</th>
+                                            <th>Target ID</th>
+                                            <th>Change Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbody-audit">
+                                        <tr><td colspan="7" class="text-center text-muted py-4">Loading audit logs from SQLite...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================================================== -->
+                <!-- TAB 11: DISASTER RECOVERY & BACKUPS -->
+                <!-- ==================================================== -->
+                <section id="tab-backup" class="tab-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <h3>Database Disaster Recovery & Hot Backups</h3>
+                                <p>Online hot backups utilize the native SQLite Online Backup API without locks or table blocking</p>
+                            </div>
+                            <button class="btn btn-primary" id="btn-trigger-backup-tab">Create Hot Backup Now</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="backup-status-panel" class="detail-row mb-4">
+                                <span class="detail-key">Database Engine Status:</span>
+                                <span class="detail-val text-success">SQLite 3.x WAL Active (integrity_check: OK)</span>
+                            </div>
+                            <div id="backup-result-box" class="dsa-metric-box font-mono text-sm text-muted">
+                                Click "Create Hot Backup Now" to trigger a live snapshot into the `backups/` directory.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- SLIDE-OVER DRAWER: DETAILED VEHICLE PROFILE -->
+    <!-- ==================================================== -->
+    <div class="drawer-backdrop" id="vehicle-drawer-backdrop">
+        <aside class="slide-drawer" id="vehicle-drawer">
+            <div class="drawer-header">
+                <div class="drawer-title-wrap">
+                    <div class="drawer-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+                    </div>
+                    <div>
+                        <div class="drawer-title" id="drawer-vehicle-reg">MH-01-AB-1001</div>
+                        <div class="drawer-subtitle" id="drawer-vehicle-model">Tata Ace Gold (2022)</div>
+                    </div>
+                </div>
+                <button class="drawer-close" id="btn-close-drawer">&times;</button>
+            </div>
+
+            <!-- Drawer Hero Quick Stats -->
+            <div class="drawer-hero-stats">
+                <div class="drawer-hero-stat-card">
+                    <div class="drawer-hero-label">Odometer</div>
+                    <div class="drawer-hero-value" id="drawer-odometer">0 km</div>
+                </div>
+                <div class="drawer-hero-stat-card">
+                    <div class="drawer-hero-label">Fuel Level</div>
+                    <div class="drawer-hero-value" id="drawer-fuel">0%</div>
+                </div>
+                <div class="drawer-hero-stat-card">
+                    <div class="drawer-hero-label">Status</div>
+                    <div class="drawer-hero-value" id="drawer-status">Available</div>
+                </div>
+            </div>
+
+            <!-- Drawer Navigation Tabs -->
+            <div class="drawer-nav-tabs">
+                <button class="drawer-tab-btn active" data-drawer-tab="specs">Overview & Specs</button>
+                <button class="drawer-tab-btn" data-drawer-tab="history">Service History</button>
+                <button class="drawer-tab-btn" data-drawer-tab="schedules">Schedules</button>
+                <button class="drawer-tab-btn" data-drawer-tab="expenses">Expenses</button>
+            </div>
+
+            <!-- Drawer Scrollable Body -->
+            <div class="drawer-body">
+                <!-- Tab: Specs -->
+                <div class="drawer-tab-content active" id="drawer-content-specs">
+                    <div class="detail-list">
+                        <div class="detail-row">
+                            <span class="detail-key">Assigned Driver:</span>
+                            <span class="detail-val" id="drawer-driver-name">Unassigned</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-key">VIN / Chassis:</span>
+                            <span class="detail-val font-mono" id="drawer-vin">-</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-key">Fuel Type:</span>
+                            <span class="detail-val" id="drawer-fuel-type">Diesel</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-key">Manufacturing Year:</span>
+                            <span class="detail-val" id="drawer-year">-</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-key">Insurance Expiry:</span>
+                            <span class="detail-val" id="drawer-insurance">-</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <h4 style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">Quick Actions for this Asset</h4>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-secondary btn-sm" id="btn-drawer-edit-vehicle">Edit Specifications</button>
+                            <button class="btn btn-outline btn-sm" id="btn-drawer-assign-driver">Change Driver</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: Service History -->
+                <div class="drawer-tab-content" id="drawer-content-history">
+                    <div id="drawer-history-list">
+                        <div class="text-center text-muted py-4">Loading past service records...</div>
+                    </div>
+                </div>
+
+                <!-- Tab: Preventive Schedules -->
+                <div class="drawer-tab-content" id="drawer-content-schedules">
+                    <div id="drawer-schedules-list">
+                        <div class="text-center text-muted py-4">Loading preventive thresholds...</div>
+                    </div>
+                </div>
+
+                <!-- Tab: Expenses -->
+                <div class="drawer-tab-content" id="drawer-content-expenses">
+                    <div id="drawer-expenses-list">
+                        <div class="text-center text-muted py-4">Loading vehicle expenditures...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Drawer Footer -->
+            <div class="drawer-footer">
+                <button class="btn btn-secondary btn-sm" id="btn-drawer-add-expense">+ Add Expense</button>
+                <button class="btn btn-primary btn-sm" id="btn-drawer-log-service">+ Log Maintenance</button>
+            </div>
+        </aside>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- MODALS -->
+    <!-- ==================================================== -->
+
+    <!-- Modal 1: Add New Vehicle -->
+    <div id="modal-vehicle" class="modal-backdrop hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Add New Commercial Vehicle</h3>
+                <button class="modal-close" data-close="modal-vehicle">&times;</button>
+            </div>
+            <form id="form-add-vehicle" class="modal-body">
+                <div class="form-group">
+                    <label>Registration Number (License Plate) *</label>
+                    <input type="text" id="v-reg" required placeholder="e.g. MH01AB1234" />
+                    <div class="form-hint">Standard format: State code, district, letters, and 4 digits.</div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Make *</label>
+                        <input type="text" id="v-make" required placeholder="e.g. Tata" />
+                    </div>
+                    <div class="form-group">
+                        <label>Model *</label>
+                        <input type="text" id="v-model" required placeholder="e.g. Ace Gold" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Manufacturing Year *</label>
+                        <input type="number" id="v-year" required min="1995" max="2026" value="2023" />
+                    </div>
+                    <div class="form-group">
+                        <label>17-Digit VIN / Chassis *</label>
+                        <input type="text" id="v-vin" required placeholder="e.g. MAT621123N1234567" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Fuel Type *</label>
+                        <select id="v-fuel-type">
+                            <option value="Diesel">Diesel</option>
+                            <option value="Petrol">Petrol</option>
+                            <option value="CNG">CNG</option>
+                            <option value="Electric">Electric</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Initial Fuel Level (%)</label>
+                        <input type="number" id="v-fuel-pct" min="0" max="100" value="80" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Current Odometer (KM)</label>
+                        <input type="number" id="v-odometer" min="0" value="0" />
+                    </div>
+                    <div class="form-group">
+                        <label>Insurance Expiry Date</label>
+                        <input type="date" id="v-insurance" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-vehicle">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Asset to SQLite</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 2: Edit Vehicle -->
+    <div id="modal-edit-vehicle" class="modal-backdrop hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Edit Vehicle Specifications</h3>
+                <button class="modal-close" data-close="modal-edit-vehicle">&times;</button>
+            </div>
+            <form id="form-edit-vehicle" class="modal-body">
+                <input type="hidden" id="edit-v-id" />
+                <div class="form-group">
+                    <label>Registration Number (Read-Only Identity)</label>
+                    <input type="text" id="edit-v-reg" readonly style="background-color: var(--bg-muted); cursor: not-allowed;" />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Make *</label>
+                        <input type="text" id="edit-v-make" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Model *</label>
+                        <input type="text" id="edit-v-model" required />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Year</label>
+                        <input type="number" id="edit-v-year" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="edit-v-status">
+                            <option value="Available">Available</option>
+                            <option value="On Trip">On Trip</option>
+                            <option value="Maintenance">Maintenance</option>
+                            <option value="Out of Service">Out of Service</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Odometer (KM)</label>
+                        <input type="number" id="edit-v-odometer" required min="0" />
+                    </div>
+                    <div class="form-group">
+                        <label>Fuel Level (%)</label>
+                        <input type="number" id="edit-v-fuel" min="0" max="100" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Insurance Expiry Date</label>
+                    <input type="date" id="edit-v-insurance" />
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-edit-vehicle">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Asset</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 3: Add Driver -->
+    <div id="modal-driver" class="modal-backdrop hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Add Commercial Driver</h3>
+                <button class="modal-close" data-close="modal-driver">&times;</button>
+            </div>
+            <form id="form-add-driver" class="modal-body">
+                <div class="form-group">
+                    <label>Driver Full Name *</label>
+                    <input type="text" id="d-name" required placeholder="e.g. Ramesh Kumar" />
+                </div>
+                <div class="form-group">
+                    <label>Phone Number *</label>
+                    <input type="text" id="d-phone" required placeholder="e.g. +91 98200 12345" />
+                </div>
+                <div class="form-group">
+                    <label>Commercial Driver License (CDL) *</label>
+                    <input type="text" id="d-license" required placeholder="e.g. MH01-2018-0098765" />
+                </div>
+                <div class="form-group">
+                    <label>License Expiry Date *</label>
+                    <input type="date" id="d-expiry" required />
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-driver">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Driver</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 4: Record Maintenance Service -->
+    <div id="modal-maintenance" class="modal-backdrop hidden">
+        <div class="modal-box modal-box-lg">
+            <div class="modal-header">
+                <h3>Record Vehicle Maintenance & Service</h3>
+                <button class="modal-close" data-close="modal-maintenance">&times;</button>
+            </div>
+            <form id="form-add-maintenance" class="modal-body">
+                <div class="form-group">
+                    <label>Target Commercial Vehicle *</label>
+                    <select id="m-vehicle-id" required></select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Service Category *</label>
+                        <select id="m-service-type">
+                            <option value="Periodic Service">Periodic Service</option>
+                            <option value="Engine Repair">Engine Repair</option>
+                            <option value="Brake Overhaul">Brake Overhaul</option>
+                            <option value="Tire Replacement">Tire Replacement</option>
+                            <option value="Battery Service">Battery Service</option>
+                            <option value="Suspension Repair">Suspension Repair</option>
+                            <option value="General Inspection">General Inspection</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Service Date *</label>
+                        <input type="date" id="m-date" required />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Current Service Odometer (KM) *</label>
+                        <input type="number" id="m-odometer" required min="0" />
+                    </div>
+                    <div class="form-group">
+                        <label>Workshop / Provider *</label>
+                        <input type="text" id="m-workshop" required placeholder="e.g. Tata Authorized Central Depot" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Labour Cost (Rs.)</label>
+                        <input type="number" id="m-labour" min="0" value="0" />
+                    </div>
+                    <div class="form-group">
+                        <label>Parts Cost (Rs.)</label>
+                        <input type="number" id="m-parts" min="0" value="0" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Work Performed & Diagnostic Notes *</label>
+                    <textarea id="m-desc" rows="2" required placeholder="Describe technical repairs, parts swapped, and fluid grades..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-maintenance">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Commit Service & Link Expense</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 5: Create Preventive Schedule -->
+    <div id="modal-schedule" class="modal-backdrop hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Create Preventive Maintenance Milestone</h3>
+                <button class="modal-close" data-close="modal-schedule">&times;</button>
+            </div>
+            <form id="form-add-schedule" class="modal-body">
+                <div class="form-group">
+                    <label>Vehicle Asset *</label>
+                    <select id="s-vehicle-id" required></select>
+                </div>
+                <div class="form-group">
+                    <label>Service Milestone Name *</label>
+                    <input type="text" id="s-name" required placeholder="e.g. 30,000 KM Engine Oil & Filter Change" />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Target Due Date *</label>
+                        <input type="date" id="s-due-date" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Due Odometer Threshold (KM)</label>
+                        <input type="number" id="s-due-odometer" min="0" placeholder="e.g. 30000" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-schedule">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Schedule Milestone</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 6: Record Operating Expense -->
+    <div id="modal-expense" class="modal-backdrop hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Record Operating Expenditure</h3>
+                <button class="modal-close" data-close="modal-expense">&times;</button>
+            </div>
+            <form id="form-add-expense" class="modal-body">
+                <div class="form-group">
+                    <label>Vehicle Asset *</label>
+                    <select id="e-vehicle-id" required></select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Expense Category *</label>
+                        <select id="e-category">
+                            <option value="Fuel">Fuel</option>
+                            <option value="Toll">Toll Tax</option>
+                            <option value="Parts">Spare Parts</option>
+                            <option value="Insurance">Insurance Premium</option>
+                            <option value="Other">Miscellaneous</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Amount (Rs.) *</label>
+                        <input type="number" id="e-amount" required min="1" placeholder="e.g. 4500" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Date *</label>
+                        <input type="date" id="e-date" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Vendor / Invoice Reference</label>
+                        <input type="text" id="e-desc" required placeholder="e.g. HPCL Petrol Pump" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-expense">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Expense to Ledger</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+        <!-- Modal 8: Authentication & Role Switcher -->
+    <div id="modal-auth-login" class="modal-backdrop hidden">
+        <div class="modal-box" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3>Account Authentication & Role Switching</h3>
+                <button class="modal-close" data-close="modal-auth-login">&times;</button>
+            </div>
+            <form id="form-auth-login" class="modal-body">
+                <!-- Current Session Status Indicator -->
+                <div id="auth-current-session-bar" style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <span style="font-size: 11px; text-transform: uppercase; color: #64748B; font-weight: 600; display: block;">Active Server Session</span>
+                        <span id="modal-session-user" style="font-size: 13px; font-weight: 600; color: #0F172A;">Signed in as: admin (Administrator)</span>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm" id="btn-auth-logout" style="color: #DC2626; border-color: #FECACA; padding: 4px 8px; font-size: 11px;">Sign Out</button>
+                </div>
+
+                <p class="text-sm text-muted" style="margin-bottom: 12px;">Authenticate against the C11 SQLite backend with PBKDF2-HMAC-SHA256 password verification and role-based access control.</p>
+                
+                <div class="form-group">
+                    <label>Username *</label>
+                    <input type="text" id="login-username" required placeholder="admin / manager / staff" />
+                </div>
+                <div class="form-group">
+                    <label>Password *</label>
+                    <input type="password" id="login-password" required placeholder="Enter password" />
+                </div>
+
+                <div style="background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px; margin-bottom: 14px; font-size: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                        <span style="font-weight: 600; color: #475569;">[Development Only] Demo Credentials Autofill:</span>
+                        <span style="font-size: 10px; background: #E2E8F0; color: #475569; padding: 1px 5px; border-radius: 4px;">Dev Sandbox</span>
+                    </div>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-outline btn-sm" id="btn-fill-admin" style="padding: 2px 8px; font-size: 11px;">Admin (Full Control)</button>
+                        <button type="button" class="btn btn-outline btn-sm" id="btn-fill-manager" style="padding: 2px 8px; font-size: 11px;">Manager (Operations)</button>
+                        <button type="button" class="btn btn-outline btn-sm" id="btn-fill-staff" style="padding: 2px 8px; font-size: 11px;">Staff (Workshop)</button>
+                    </div>
+                    <p style="font-size: 11px; color: #64748B; margin-top: 6px; margin-bottom: 0;">Autofills login credentials for verification. Does not bypass authentication.</p>
+                </div>
+                
+                <div id="login-error-msg" class="text-danger text-sm hidden" style="margin-bottom: 10px; color: #DC2626; font-weight: 500;"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-auth-login">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btn-submit-login">Authenticate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 7: Assign Driver -->
+    <div id="modal-assign-driver" class="modal-backdrop hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Assign Commercial Driver</h3>
+                <button class="modal-close" data-close="modal-assign-driver">&times;</button>
+            </div>
+            <form id="form-assign-driver" class="modal-body">
+                <input type="hidden" id="assign-vehicle-id" />
+                <div class="form-group">
+                    <label>Vehicle</label>
+                    <input type="text" id="assign-vehicle-reg" readonly style="background-color: var(--bg-muted); cursor: not-allowed;" />
+                </div>
+                <div class="form-group">
+                    <label>Select Commercial Driver</label>
+                    <select id="assign-driver-select" required>
+                        <option value="0">-- Unassigned --</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="modal-assign-driver">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Confirm Allocation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Client Controller Logic -->
+    <script src="app.js"></script>
+</body>
+</html>

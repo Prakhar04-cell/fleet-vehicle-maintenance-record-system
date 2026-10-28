@@ -1,0 +1,27 @@
+CompileFlags:
+  Add:
+    - "-Iinclude"
+    - "-I./include"
+    - "-IC:/Users/singh/Desktop/fleet vehicle maintenance record system/include"
+    - "-isystem"
+    - "C:/msys64/ucrt64/include"
+    - "-IC:/msys64/ucrt64/include"
+    - "-isystem"
+    - "C:/msys64/ucrt64/lib/gcc/x86_64-w64-mingw32/16.2.0/include"
+    - "-isystem"
+    - "C:/msys64/ucrt64/lib/gcc/x86_64-w64-mingw32/16.2.0/include-fixed"
+    - "--target=x86_64-w64-mingw32"
+    - "--sysroot=C:/msys64/ucrt64"
+    - "-std=c11"
+    - "-D_WIN32"
+    - "-D_WIN32_WINNT=0x0601"
+    - "-Wno-builtin-definition"
+    - "-Wno-builtin-requires-header"
+
+Diagnostics:
+  Suppress:
+    - "builtin_definition"
+    - "unused-includes"
+    - "pp_file_not_found"
+    - "pp_file_not_found_angled_include_not_fatal"
+    - "pp_file_not_found_use_quotes"

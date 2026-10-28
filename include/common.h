@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
-#include <ctype.h>
 
 #define APP_NAME "Fleet Vehicle Maintenance Record System"
 #define APP_VERSION "1.0.0"

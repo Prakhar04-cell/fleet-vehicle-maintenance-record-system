@@ -26,5 +26,6 @@ reports/*.pdf
 # IDE and editor artifacts
 .vscode/
 .idea/
+.cache/
 *.swp
 *.patch

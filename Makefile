@@ -1,10 +1,16 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -O2 -Iinclude
 LIBS ?= -lsqlite3 -lssl -lcrypto
+LDFLAGS ?=
 
-# Executable extension
+# Executable extension and Windows-specific configuration
 ifeq ($(OS),Windows_NT)
     EXE = .exe
+    LIBS += -lws2_32
+    ifneq ($(wildcard C:/msys64/ucrt64/include/sqlite3.h),)
+        CFLAGS += -I"C:/msys64/ucrt64/include"
+        LDFLAGS += -L"C:/msys64/ucrt64/lib"
+    endif
 else
     EXE =
 endif
@@ -28,7 +34,9 @@ SRCS = src/common.c \
        src/reports_csv.c \
        src/reports_pdf.c \
        src/backup.c \
-       src/ui.c
+       src/ui.c \
+       src/dsa.c \
+       src/http_server.c
 
 MAIN_SRC = src/main.c
 TEST_SRC = tests/test_main.c
@@ -37,19 +45,19 @@ OBJS = $(SRCS:.c=.o)
 MAIN_OBJ = $(MAIN_SRC:.c=.o)
 TEST_OBJ = $(TEST_SRC:.c=.o)
 
-.PHONY: all run test clean directories sanitize
+.PHONY: all run test web dsa clean directories sanitize seed
 
 all: directories $(TARGET)
 
 directories:
-	@mkdir -p data reports backups
+	@python -c "import os; [os.makedirs(d, exist_ok=True) for d in ['data', 'reports', 'backups', 'web']]"
 
 $(TARGET): $(OBJS) $(MAIN_OBJ)
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 	@echo Build complete: $@
 
 $(TEST_TARGET): $(OBJS) $(TEST_OBJ)
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 	@echo Test suite build complete: $@
 
 %.o: %.c
@@ -57,6 +65,12 @@ $(TEST_TARGET): $(OBJS) $(TEST_OBJ)
 
 run: all
 	./$(TARGET)
+
+web: all
+	./$(TARGET) --web
+
+dsa: all
+	./$(TARGET) --dsa
 
 test: directories $(TEST_TARGET)
 	./$(TEST_TARGET)
