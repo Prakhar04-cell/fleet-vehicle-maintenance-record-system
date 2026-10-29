@@ -4,9 +4,10 @@
 
 | Test Suite | Target Component | Assertions Run | Assertions Passed | Assertions Failed | Status |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **C11 Native Core & Security Suite** | `tests/test_main.c` / C11 Backend | 177 | 177 | 0 | **100% PASS** |
-| **Live C11 HTTP RBAC Suite** | `tests/test_rbac_live.py` / Winsock2 Server | 68 | 68 | 0 | **100% PASS** |
-| **Total Automated Assertions** | **Full System Stack** | **245** | **245** | **0** | **100% PASS** |
+| **C11 Native Core & Security Suite** | `tests/test_main.c` / C11 Backend | 199 | 199 | 0 | **100% PASS** |
+| **Live C11 HTTP RBAC Suite** | `tests/test_rbac_live.py` / Winsock2 Server | 81 | 81 | 0 | **100% PASS** |
+| **Live Smart Fleet E2E Suite** | `tests/test_smart_fleet_e2e.py` / Winsock2 Server | 33 | 33 | 0 | **100% PASS** |
+| **Total Automated Assertions** | **Full System Stack** | **313** | **313** | **0** | **100% PASS** |
 
 ---
 
@@ -17,18 +18,19 @@
 - **Compiler**: GCC 14.2.0 (UCRT64 MSYS2 Toolchain)
 - **Database Used**: `data/test_fleet.db` (Isolated, zero production pollution)
 - **Key Modules Verified**:
-  - `auth_has_permission` bitmask validation across all 4 roles (`ROLE_ADMIN`, `ROLE_MANAGER`, `ROLE_STAFF`, `ROLE_VIEWER`).
+  - `auth_has_permission` bitmask validation across all roles (`ROLE_ADMIN`, `ROLE_MANAGER`, `ROLE_STAFF`, `ROLE_VIEWER`).
   - Cryptographic token generation (`RAND_bytes`, 256 bits, 64-hex chars).
   - Sliding TTL validation (24 hours).
   - Malformed and NULL token rejection.
   - Invalidation on session destruction (`auth_session_destroy`).
   - Live account status checks (rejects deactivated user accounts even if session token exists).
   - CRUD operations for vehicles, commercial drivers, maintenance work orders, preventive schedules, expenses, and PDF/CSV reporting.
+  - Smart Fleet modules: Work Order lifecycle transitions, technician assignment, atomic completion, 8-item digital inspection checklist, defect severity, and defect-to-repair work order escalation.
   - DSA algorithms (Hash Table, BST, Min-Heap, FIFO Queue, LIFO Stack, Merge Sort, Dijkstra, DP Knapsack, Branch & Bound TSP).
 
 ```text
 =================================================================
- TEST RESULTS SUMMARY: 177 / 177 Tests Passed (100%)
+ TEST RESULTS SUMMARY: 199 / 199 Tests Passed (100%)
 =================================================================
 ```
 
@@ -37,7 +39,7 @@
 ### B. Live C11 HTTP Winsock2 Server RBAC Suite (`tests/test_rbac_live.py`)
 - **Execution Command**: `python tests/test_rbac_live.py`
 - **Runtime Tested**: Native C11 Winsock2 HTTP Server running live on port `8089` against a sandbox copy (`data/test_rbac.db`).
-- **Results**: **68 Passed, 0 Failed**.
+- **Results**: **81 Passed, 0 Failed**.
 
 #### 1. Anonymous / Unauthenticated Request Rejection (401 Unauthorized)
 - Verified that all protected endpoints deny unauthenticated requests with `HTTP 401 Unauthorized` and `{"success": false, "code": 401}`:
@@ -53,6 +55,9 @@
   - `GET /api/reports/pdf?type=fleet` -> `401 Unauthorized` [PASS]
   - `GET /api/auth/session` -> `401 Unauthorized` [PASS]
   - `GET /api/auth/users` -> `401 Unauthorized` [PASS]
+  - `GET /api/work-orders` -> `401 Unauthorized` [PASS]
+  - `GET /api/inspections` -> `401 Unauthorized` [PASS]
+  - `GET /api/analytics` -> `401 Unauthorized` [PASS]
   - Forged / invalid 64-hex token -> `401 Unauthorized` [PASS]
 
 #### 2. Maintenance Staff Role Permissions (`staff` / `Staff@123`)
@@ -63,6 +68,11 @@
   - `GET /api/maintenance` -> `200 OK` [PASS]
   - `GET /api/schedules` -> `200 OK` [PASS]
   - `POST /api/maintenance` (log service) -> `201 Created` [PASS]
+  - `GET /api/work-orders` -> `200 OK` [PASS]
+  - `POST /api/work-orders` -> `201 Created` [PASS]
+  - `GET /api/inspections` -> `200 OK` [PASS]
+  - `POST /api/inspections` -> `201 Created` [PASS]
+  - `GET /api/dsa/run` -> `200 OK` [PASS]
 - **Forbidden Operations Strictly Denied with 403 Forbidden**:
   - `DELETE /api/vehicles?id=1` -> `403 Forbidden` [PASS]
   - `POST /api/drivers` -> `403 Forbidden` [PASS]

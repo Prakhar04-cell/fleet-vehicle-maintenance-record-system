@@ -12,6 +12,8 @@
 #include "reports.h"
 #include "backup.h"
 #include "dsa.h"
+#include "work_order.h"
+#include "inspection.h"
 
 #include <assert.h>
 
@@ -879,6 +881,127 @@ static void run_dsa_tests(void) {
                 "DSA Branch & Bound TSP finds optimal inspection circuit cost (80 km)");
 }
 
+/* ==================== 9. SMART FLEET WORK ORDERS & INSPECTIONS ==================== */
+static void run_smart_fleet_tests(void) {
+    printf("\n=== 9. Running Smart Fleet Work Orders & Inspection Tests ===\n");
+
+    /* 1. Create Work Order */
+    WorkOrder wo = {0};
+    wo.vehicle_id = 1;
+    safe_strncpy(wo.title, "Transmission Flush & Filter", sizeof(wo.title));
+    safe_strncpy(wo.description, "Complete synthetic transmission fluid flush", sizeof(wo.description));
+    safe_strncpy(wo.priority, "High", sizeof(wo.priority));
+    safe_strncpy(wo.status, "Open", sizeof(wo.status));
+    wo.labour_cost = 250000; /* Rs. 2,500 */
+    wo.parts_cost = 350000;  /* Rs. 3,500 */
+
+    StatusCode sc = work_order_create(&wo, 1, "admin");
+    TEST_ASSERT(sc == STATUS_OK && wo.id > 0, "Created Work Order successfully");
+    TEST_ASSERT(strlen(wo.wo_number) > 5, "Work Order auto-generated unique tracking number");
+
+    /* 2. Retrieve Work Order by ID */
+    WorkOrder fetched_wo;
+    sc = work_order_get_by_id(wo.id, &fetched_wo);
+    TEST_ASSERT(sc == STATUS_OK && strcmp(fetched_wo.title, wo.title) == 0, "Fetched Work Order by ID");
+    TEST_ASSERT(strlen(fetched_wo.vehicle_reg) > 0, "Work Order joined vehicle registration number");
+
+    /* 3. Status Transition Validation */
+    sc = work_order_update_status(wo.id, "Completed", "Trying to skip in progress", 1, "admin");
+    TEST_ASSERT(sc == STATUS_INVALID_INPUT, "Reject invalid transition Open -> Completed");
+
+    /* 4. Assign Technician */
+    sc = work_order_assign(wo.id, 2, "Senior Tech Rajesh", 1, "admin");
+    TEST_ASSERT(sc == STATUS_OK, "Assigned technician to Work Order");
+
+    work_order_get_by_id(wo.id, &fetched_wo);
+    TEST_ASSERT(strcmp(fetched_wo.status, "Assigned") == 0, "Work Order status advanced to 'Assigned'");
+    TEST_ASSERT(strcmp(fetched_wo.assigned_to_name, "Senior Tech Rajesh") == 0, "Assigned technician name updated");
+
+    /* 5. Advance to In Progress */
+    sc = work_order_update_status(wo.id, "In Progress", "Work started on bay 3", 2, "staff");
+    TEST_ASSERT(sc == STATUS_OK, "Advanced Work Order to 'In Progress'");
+
+    /* 6. Complete Work Order */
+    int out_maint_id = 0;
+    sc = work_order_complete(wo.id, 28500, 250000, 350000, "Flush completed successfully", 2, "staff", &out_maint_id);
+    TEST_ASSERT(sc == STATUS_OK && out_maint_id > 0, "Completed Work Order and created Maintenance Record");
+
+    work_order_get_by_id(wo.id, &fetched_wo);
+    TEST_ASSERT(strcmp(fetched_wo.status, "Completed") == 0, "Work Order status is 'Completed'");
+    TEST_ASSERT(fetched_wo.maintenance_record_id == out_maint_id, "Work Order attached linked Maintenance Record ID");
+
+    /* 7. Prevent Duplicate Completion */
+    sc = work_order_complete(wo.id, 28500, 250000, 350000, "Duplicate try", 2, "staff", NULL);
+    TEST_ASSERT(sc == STATUS_INVALID_INPUT, "Prevent duplicate completion on already completed Work Order");
+
+    /* 8. Work Order History */
+    WorkOrderHistory *hist = NULL;
+    int hist_cnt = 0;
+    sc = work_order_get_history(wo.id, &hist, &hist_cnt);
+    TEST_ASSERT(sc == STATUS_OK && hist_cnt >= 4, "Work Order tracks full status transition history");
+    work_order_free_history(hist);
+
+    /* 9. Digital Vehicle Inspection */
+    Inspection insp = {0};
+    insp.vehicle_id = 1;
+    safe_strncpy(insp.inspector_name, "Inspector Verma", sizeof(insp.inspector_name));
+    insp.odometer_km = 28500;
+    safe_strncpy(insp.notes, "Comprehensive 40-point depot inspection", sizeof(insp.notes));
+
+    const char *std_items[8] = {
+        "Brakes", "Tyres", "Lights", "Engine",
+        "Battery", "Steering", "Fluids", "Registration & Insurance Documents"
+    };
+    InspectionItem items[8];
+    memset(items, 0, sizeof(items));
+    for (int i = 0; i < 8; i++) {
+        safe_strncpy(items[i].item_name, std_items[i], sizeof(items[i].item_name));
+        if (i == 0) {
+            safe_strncpy(items[i].status, "Fail", sizeof(items[i].status));
+            safe_strncpy(items[i].severity, "Critical Defect", sizeof(items[i].severity));
+            safe_strncpy(items[i].notes, "Front right brake pad worn down to metal", sizeof(items[i].notes));
+        } else if (i == 1) {
+            safe_strncpy(items[i].status, "Fail", sizeof(items[i].status));
+            safe_strncpy(items[i].severity, "Minor Defect", sizeof(items[i].severity));
+            safe_strncpy(items[i].notes, "Tyre pressure low by 4 PSI", sizeof(items[i].notes));
+        } else {
+            safe_strncpy(items[i].status, "Pass", sizeof(items[i].status));
+            safe_strncpy(items[i].severity, "Normal", sizeof(items[i].severity));
+        }
+    }
+
+    sc = inspection_create(&insp, items, 8, 1);
+    TEST_ASSERT(sc == STATUS_OK && insp.id > 0, "Created Digital Vehicle Inspection with 8 checklist items");
+    TEST_ASSERT(insp.defect_count == 2, "Inspection accurately counted 2 defects");
+    TEST_ASSERT(strcmp(insp.overall_status, "Fail") == 0, "Critical defect correctly escalated overall status to 'Fail'");
+
+    /* 10. Inspection Retrieval & Detail */
+    Inspection fetched_insp;
+    InspectionItem *fetched_items = NULL;
+    int f_count = 0;
+    sc = inspection_get_by_id(insp.id, &fetched_insp, &fetched_items, &f_count);
+    TEST_ASSERT(sc == STATUS_OK && f_count == 8, "Retrieved inspection details with all 8 checklist items");
+    int failed_item_id = (f_count > 0) ? fetched_items[0].id : 0;
+    inspection_free_items(fetched_items);
+
+    /* 11. Create Work Order from Defect */
+    int repair_wo_id = 0;
+    sc = inspection_create_work_order_from_defect(failed_item_id, 1, "admin", &repair_wo_id);
+    TEST_ASSERT(sc == STATUS_OK && repair_wo_id > 0, "Generated Repair Work Order directly from inspection defect");
+
+    WorkOrder repair_wo;
+    work_order_get_by_id(repair_wo_id, &repair_wo);
+    TEST_ASSERT(strcmp(repair_wo.priority, "Critical") == 0, "Repair Work Order inherited Critical priority from inspection item");
+    TEST_ASSERT(repair_wo.inspection_id == insp.id, "Repair Work Order linked to originating inspection ID");
+
+    /* 12. Query Defects */
+    InspectionItem *defects = NULL;
+    int def_count = 0;
+    sc = inspection_get_defects(1, &defects, &def_count);
+    TEST_ASSERT(sc == STATUS_OK && def_count >= 2, "Query vehicle defects returned all recorded failure items");
+    inspection_free_items(defects);
+}
+
 /* ==================== MAIN TEST ENTRY POINT ==================== */
 int main(void) {
     printf("=================================================================\n");
@@ -895,6 +1018,7 @@ int main(void) {
     run_report_tests();
     run_backup_and_audit_tests();
     run_dsa_tests();
+    run_smart_fleet_tests();
 
     teardown_test_db();
 

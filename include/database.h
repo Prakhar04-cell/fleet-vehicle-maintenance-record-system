@@ -8,6 +8,7 @@
 StatusCode db_init(const char *db_path);
 void db_close(void);
 sqlite3 *db_get_handle(void);
+const char *db_get_path(void);
 
 StatusCode db_begin_transaction(void);
 StatusCode db_commit_transaction(void);

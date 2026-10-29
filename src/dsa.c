@@ -2,17 +2,32 @@
 #include "database.h"
 #include "ui.h"
 #include <limits.h>
+#include <ctype.h>
 
 /* =========================================================================
  * 1. HASH TABLE IMPLEMENTATION
  * ========================================================================= */
 static unsigned long hash_djb2(const char *str) {
     unsigned long hash = 5381;
-    int c;
-    while ((c = (unsigned char)*str++)) {
+    while (*str) {
+        char c = *str++;
+        if (c == '-' || c == ' ' || c == '_') continue;
+        c = (char)tolower((unsigned char)c);
         hash = ((hash << 5) + hash) + (unsigned long)c; /* hash * 33 + c */
     }
     return hash;
+}
+
+static bool reg_normalized_equals(const char *s1, const char *s2) {
+    if (!s1 || !s2) return false;
+    while (*s1 || *s2) {
+        while (*s1 == '-' || *s1 == ' ' || *s1 == '_') s1++;
+        while (*s2 == '-' || *s2 == ' ' || *s2 == '_') s2++;
+        if (tolower((unsigned char)*s1) != tolower((unsigned char)*s2)) return false;
+        if (*s1) s1++;
+        if (*s2) s2++;
+    }
+    return true;
 }
 
 DsaHashTable *dsa_ht_create(size_t capacity) {
@@ -37,7 +52,7 @@ StatusCode dsa_ht_insert(DsaHashTable *ht, const Vehicle *v) {
     /* Check if key already exists (update existing) */
     DsaHashNode *cur = ht->buckets[idx];
     while (cur) {
-        if (strcasecmp(cur->key, v->registration_number) == 0) {
+        if (reg_normalized_equals(cur->key, v->registration_number)) {
             cur->value = *v;
             return STATUS_OK;
         }
@@ -63,7 +78,7 @@ const Vehicle *dsa_ht_search(const DsaHashTable *ht, const char *reg_number) {
     unsigned long idx = hash_djb2(reg_number) % ht->capacity;
     DsaHashNode *cur = ht->buckets[idx];
     while (cur) {
-        if (strcasecmp(cur->key, reg_number) == 0) {
+        if (reg_normalized_equals(cur->key, reg_number)) {
             return &cur->value;
         }
         cur = cur->next;
@@ -79,7 +94,7 @@ bool dsa_ht_remove(DsaHashTable *ht, const char *reg_number) {
     DsaHashNode *prev = NULL;
 
     while (cur) {
-        if (strcasecmp(cur->key, reg_number) == 0) {
+        if (reg_normalized_equals(cur->key, reg_number)) {
             if (prev) {
                 prev->next = cur->next;
             } else {

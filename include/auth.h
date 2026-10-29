@@ -23,6 +23,8 @@ typedef enum {
 #define PERM_VEHICLE_DELETE      (1 << 8)
 #define PERM_DRIVER_WRITE        (1 << 9)
 #define PERM_AUDIT_VIEW          (1 << 10)
+#define PERM_WORK_ORDER_WRITE    (1 << 11)
+#define PERM_INSPECTION_WRITE    (1 << 12)
 
 #define SALT_BYTE_LENGTH 16
 #define HASH_HEX_LENGTH 65

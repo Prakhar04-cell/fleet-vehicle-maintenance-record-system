@@ -121,6 +121,9 @@ def main():
             ("GET", "/api/reports/pdf?type=fleet"),
             ("GET", "/api/auth/session"),
             ("GET", "/api/auth/users"),
+            ("GET", "/api/work-orders"),
+            ("GET", "/api/inspections"),
+            ("GET", "/api/analytics"),
         ]
         for m, ep in unauth_endpoints:
             code, body, _ = request(ep, method=m)
@@ -165,6 +168,36 @@ def main():
         }
         code, _, _ = request("/api/maintenance", method="POST", body=maint_payload, token=staff_token)
         assert_true(code == 201, "Staff permitted to record workshop service work order (201 Created)")
+
+        # Staff Work Orders & Inspection Operations
+        code, body, _ = request("/api/work-orders", token=staff_token)
+        assert_true(code == 200 and isinstance(body.get("data"), list), "Staff permitted to view Work Orders (200 OK)")
+
+        wo_payload = {
+            "vehicle_id": 1,
+            "title": "Brake System Check",
+            "description": "Inspected calipers and rotors",
+            "priority": "Medium",
+            "status": "In Progress"
+        }
+        code, body, _ = request("/api/work-orders", method="POST", body=wo_payload, token=staff_token)
+        assert_true(code == 201 and "id" in body, "Staff permitted to create Work Order (201 Created)")
+
+        code, body, _ = request("/api/inspections", token=staff_token)
+        assert_true(code == 200 and isinstance(body.get("data"), list), "Staff permitted to view Inspections (200 OK)")
+
+        insp_payload = {
+            "vehicle_id": 1,
+            "inspector_name": "Technician Ramesh",
+            "inspection_date": "2026-10-28",
+            "odometer_km": 28500,
+            "notes": "Pre-trip daily inspection check"
+        }
+        code, body, _ = request("/api/inspections", method="POST", body=insp_payload, token=staff_token)
+        assert_true(code == 201 and "id" in body, "Staff permitted to submit Digital Vehicle Inspection (201 Created)")
+
+        code, body, _ = request("/api/dsa/run", token=staff_token)
+        assert_true(code == 200 and "algorithms" in body, "Staff permitted to view DSA Algorithm benchmarks (200 OK)")
 
         # Staff Forbidden (Must return 403)
         code, _, _ = request("/api/vehicles?id=1", method="DELETE", token=staff_token)
@@ -257,6 +290,13 @@ def main():
 
         code, _, _ = request("/api/reports/pdf?type=fleet", token=mgr_token)
         assert_true(code == 200, "Manager permitted to export Fleet Summary PDF report (200 OK)")
+
+        # Manager Work Orders & Analytics
+        code, body, _ = request("/api/work-orders", token=mgr_token)
+        assert_true(code == 200, "Manager permitted to view Work Orders (200 OK)")
+
+        code, body, _ = request("/api/analytics", token=mgr_token)
+        assert_true(code == 200 and "summary" in body, "Manager permitted to view Fleet Cost Analytics (200 OK)")
 
         # Manager Forbidden (Must return 403)
         code, _, _ = request("/api/vehicles?id=1", method="DELETE", token=mgr_token)

@@ -9,6 +9,11 @@
 #endif
 
 static sqlite3 *g_db = NULL;
+static char g_active_db_path[MAX_BUFFER_MD] = "";
+
+const char *db_get_path(void) {
+    return g_active_db_path;
+}
 
 static void ensure_parent_directory(const char *filepath) {
     char dir[MAX_BUFFER_MD];
@@ -26,6 +31,7 @@ StatusCode db_init(const char *db_path) {
         return STATUS_OK;
     }
     const char *path = db_path ? db_path : DEFAULT_DB_PATH;
+    safe_strncpy(g_active_db_path, path, sizeof(g_active_db_path));
     ensure_parent_directory(path);
 
     int rc = sqlite3_open_v2(path, &g_db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
@@ -199,6 +205,46 @@ StatusCode db_run_migrations(const char *migrations_dir) {
             return status;
         }
         printf("[DB] Migration 001 applied successfully.\n");
+    }
+
+    /* Check if migration 2 is already applied */
+    char path002[MAX_BUFFER_MD];
+    snprintf(path002, sizeof(path002), "%s/002_smart_fleet_management.sql", dir);
+    int applied2 = 0;
+    if (sqlite3_prepare_v2(g_db, "SELECT COUNT(*) FROM schema_migrations WHERE version = 2;", -1, &check_stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(check_stmt) == SQLITE_ROW) {
+            applied2 = sqlite3_column_int(check_stmt, 0);
+        }
+        sqlite3_finalize(check_stmt);
+    }
+
+    if (!applied2) {
+        printf("[DB] Applying migration 002_smart_fleet_management.sql...\n");
+        StatusCode status = apply_migration_file(path002, 2, "002_smart_fleet_management");
+        if (status != STATUS_OK) {
+            return status;
+        }
+        printf("[DB] Migration 002 applied successfully.\n");
+    }
+
+    /* Check if migration 3 is already applied */
+    char path003[MAX_BUFFER_MD];
+    snprintf(path003, sizeof(path003), "%s/003_live_monitoring_and_dsa.sql", dir);
+    int applied3 = 0;
+    if (sqlite3_prepare_v2(g_db, "SELECT COUNT(*) FROM schema_migrations WHERE version = 3;", -1, &check_stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(check_stmt) == SQLITE_ROW) {
+            applied3 = sqlite3_column_int(check_stmt, 0);
+        }
+        sqlite3_finalize(check_stmt);
+    }
+
+    if (!applied3) {
+        printf("[DB] Applying migration 003_live_monitoring_and_dsa.sql...\n");
+        StatusCode status = apply_migration_file(path003, 3, "003_live_monitoring_and_dsa");
+        if (status != STATUS_OK) {
+            return status;
+        }
+        printf("[DB] Migration 003 applied successfully.\n");
     }
 
     return STATUS_OK;

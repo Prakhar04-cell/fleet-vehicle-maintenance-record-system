@@ -10,6 +10,7 @@
 static void print_usage(const char *prog_name) {
     printf("Usage: %s [OPTIONS]\n", prog_name);
     printf("Options:\n");
+    printf("  --demo               Start in Safe Demonstration Mode using isolated 'data/demo_fleet.db'\n");
     printf("  --check-reminders    Run headless maintenance reminder evaluation and exit (for OS task scheduler / cron)\n");
     printf("  --web, --server [p]  Start embedded C HTTP server and white/grey web dashboard (default: %d)\n", DEFAULT_HTTP_PORT);
     printf("  --dsa                Run Academic DSA demonstration suite (Hash Table, BST, Min-Heap, etc.)\n");
@@ -113,6 +114,31 @@ int main(int argc, char *argv[]) {
             headless_reminders = true;
         } else if (strcmp(argv[i], "--dsa") == 0) {
             run_dsa = true;
+        } else if (strcmp(argv[i], "--demo") == 0) {
+            db_path = "data/demo_fleet.db";
+            /* Ensure demo database exists by bootstrapping from fleet.db if absent or empty */
+            FILE *f_check = fopen("data/demo_fleet.db", "rb");
+            long demo_sz = 0;
+            if (f_check) {
+                fseek(f_check, 0, SEEK_END);
+                demo_sz = ftell(f_check);
+                fclose(f_check);
+            }
+            if (!f_check || demo_sz < 4096) {
+                FILE *f_src = fopen("data/fleet.db", "rb");
+                if (f_src) {
+                    FILE *f_dst = fopen("data/demo_fleet.db", "wb");
+                    if (f_dst) {
+                        char copy_buf[8192];
+                        size_t bytes;
+                        while ((bytes = fread(copy_buf, 1, sizeof(copy_buf), f_src)) > 0) {
+                            fwrite(copy_buf, 1, bytes, f_dst);
+                        }
+                        fclose(f_dst);
+                    }
+                    fclose(f_src);
+                }
+            }
         } else if (strcmp(argv[i], "--web") == 0) {
             run_web = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {

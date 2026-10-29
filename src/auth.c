@@ -34,11 +34,13 @@ bool auth_has_permission(UserRole role, int permission_flag) {
             return true; /* Admin has all permissions */
         case ROLE_MANAGER: {
             int manager_perms = PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE | 
-                               PERM_VEHICLE_WRITE | PERM_DRIVER_WRITE | PERM_EXPENSE_WRITE | PERM_REPORTS;
+                               PERM_VEHICLE_WRITE | PERM_DRIVER_WRITE | PERM_EXPENSE_WRITE | PERM_REPORTS |
+                               PERM_WORK_ORDER_WRITE | PERM_INSPECTION_WRITE;
             return (permission_flag & manager_perms) == permission_flag;
         }
         case ROLE_STAFF: {
-            int staff_perms = PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE;
+            int staff_perms = PERM_READ | PERM_MAINTENANCE_WRITE | PERM_SCHEDULE_WRITE |
+                              PERM_WORK_ORDER_WRITE | PERM_INSPECTION_WRITE;
             return (permission_flag & staff_perms) == permission_flag;
         }
         case ROLE_VIEWER: {

@@ -20,6 +20,23 @@ const state = {
     audit: [],
     activeVehicle: null,
     
+    // Smart Fleet Management State
+    workOrders: [],
+    inspections: [],
+    defects: [],
+    analytics: null,
+    activeWorkOrder: null,
+    activeInspection: null,
+
+    // Live Monitoring & Demonstration State
+    isLivePolling: false,
+    pollIntervalMs: 10000,
+    pollTimerId: null,
+    lastSuccessfulSync: null,
+    isDemoMode: false,
+    demoDatabasePath: '',
+    notifFilter: 'all',
+    
     // Vehicles table state
     sortField: 'reg',
     sortAsc: true,
@@ -51,6 +68,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Server-verified session initialization and RBAC policy application
     await initSessionAndApp();
+
+    // Live Telemetry, Notifications, Demo Mode, and DSA Integration
+    initLiveMonitoring();
+    checkDemoStatus();
+    initNotificationCenter();
+    initDsaOperations();
 });
 
 // ==========================================================================
@@ -194,14 +217,45 @@ function initNavigation() {
     document.getElementById('btn-export-expenses-csv')?.addEventListener('click', exportExpensesCSV);
 
     // Fleet Manager Dashboard Quick Action Buttons
-    document.getElementById('btn-mgr-quick-vehicle')?.addEventListener('click', () => openModal('modal-vehicle'));
-    document.getElementById('btn-mgr-quick-service')?.addEventListener('click', () => openLogMaintenanceModal());
-    document.getElementById('btn-mgr-quick-schedule')?.addEventListener('click', () => openCreateScheduleModal());
-    document.getElementById('btn-mgr-quick-assign')?.addEventListener('click', () => openAssignDriverModal(state.vehicles[0]?.id || 1));
+    document.getElementById('btn-mgr-add-vehicle')?.addEventListener('click', () => openModal('modal-vehicle'));
+    document.getElementById('btn-mgr-log-service')?.addEventListener('click', () => openLogMaintenanceModal());
+    document.getElementById('btn-mgr-add-schedule')?.addEventListener('click', () => openCreateScheduleModal());
+    document.getElementById('btn-mgr-add-expense')?.addEventListener('click', () => openRecordExpenseModal());
+    document.getElementById('btn-mgr-export')?.addEventListener('click', exportVehiclesCSV);
 
     // Maintenance Staff Dashboard Quick Action Buttons
     document.getElementById('btn-staff-quick-service')?.addEventListener('click', () => openLogMaintenanceModal());
     document.getElementById('btn-staff-quick-schedule')?.addEventListener('click', () => openCreateScheduleModal());
+
+    // Work Orders Toolbar & Modals
+    document.getElementById('btn-refresh-work-orders')?.addEventListener('click', () => {
+        loadWorkOrders();
+        showAlert('Work orders refreshed from SQLite.', 'info');
+    });
+    document.getElementById('btn-add-wo-modal')?.addEventListener('click', openCreateWorkOrderModal);
+    document.getElementById('wo-search-input')?.addEventListener('input', renderWorkOrdersTable);
+    document.getElementById('wo-status-filter')?.addEventListener('change', renderWorkOrdersTable);
+    document.getElementById('wo-priority-filter')?.addEventListener('change', renderWorkOrdersTable);
+
+    // Digital Inspections Toolbar & Modals
+    document.getElementById('btn-refresh-inspections')?.addEventListener('click', () => {
+        loadInspections();
+        loadDefects();
+        showAlert('Inspections and defect register refreshed.', 'info');
+    });
+    document.getElementById('btn-add-inspection-modal')?.addEventListener('click', openCreateInspectionModal);
+    document.getElementById('insp-status-filter')?.addEventListener('change', renderInspectionsTable);
+
+    // Fleet Cost Analytics
+    document.getElementById('btn-refresh-analytics')?.addEventListener('click', () => {
+        loadFleetAnalytics();
+        showAlert('Fleet analytics recalculated from SQL tables.', 'success');
+    });
+
+    // Work order completion cancel button
+    document.getElementById('btn-cancel-wo-completion')?.addEventListener('click', () => {
+        document.getElementById('wo-completion-panel')?.classList.add('hidden');
+    });
 
     // Authentication & Role Switcher
     document.getElementById('user-profile-btn')?.addEventListener('click', () => openModal('modal-auth-login'));
@@ -240,8 +294,11 @@ function switchTab(tabId) {
         drivers: 'Commercial Drivers',
         maintenance: 'Service History',
         schedules: 'Preventive Schedules',
+        'work-orders': 'Work Orders Management',
+        inspections: 'Digital Vehicle Inspections',
         reminders: 'Maintenance Reminders',
         expenses: 'Operating Expenses',
+        analytics: 'Fleet Cost Analytics',
         reports: 'Reports & Analytics',
         dsa: 'DSA Optimization Suite',
         audit: 'System Audit Trail',
@@ -253,8 +310,12 @@ function switchTab(tabId) {
         breadcrumb.textContent = breadcrumbTitles[tabId];
     }
 
-    // Lazy load specific tab data if needed
+    // Lazy load specific tab data
     if (tabId === 'audit') loadAudit();
+    if (tabId === 'work-orders') loadWorkOrders();
+    if (tabId === 'inspections') { loadInspections(); loadDefects(); }
+    if (tabId === 'analytics') loadFleetAnalytics();
+    if (tabId === 'dsa') runDsaBenchmarks();
 }
 
 function initGlobalShortcuts() {
@@ -467,11 +528,15 @@ async function loadAllData() {
         loadVehicles(),
         loadSchedules(),
         loadNotifications(),
-        loadMaintenance()
+        loadMaintenance(),
+        loadWorkOrders(),
+        loadInspections(),
+        loadDefects()
     ];
     if (role !== 'staff') {
         tasks.push(loadDrivers());
         tasks.push(loadExpenses());
+        tasks.push(loadFleetAnalytics());
     }
     if (role === 'admin') {
         tasks.push(loadAudit());
@@ -602,7 +667,7 @@ async function loadExpenses() {
 
 async function loadNotifications() {
     try {
-        const res = await fetchAPI('/api/notifications');
+        const res = await fetchAPI('/api/notifications?unread_only=0');
         const json = await res.json();
         if (json.success && json.data) {
             state.notifications = json.data;
@@ -610,6 +675,47 @@ async function loadNotifications() {
         }
     } catch (e) {
         console.error('Failed to load notifications:', e);
+    }
+}
+
+async function ackNotification(eventKey) {
+    try {
+        const res = await fetchAPI('/api/notifications/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event_key: eventKey })
+        });
+        const json = await res.json();
+        if (json.success) {
+            // Update local state item
+            const item = (state.notifications || []).find(n => n.event_key === eventKey);
+            if (item) item.is_read = 1;
+            renderNotifications();
+            showAlert('Notification acknowledged.', 'info');
+        } else {
+            showAlert('Failed to acknowledge notification: ' + (json.message || ''), 'danger');
+        }
+    } catch (e) {
+        console.error('Failed to ack notification:', e);
+        showAlert('Network error acknowledging alert.', 'danger');
+    }
+}
+
+async function ackAllNotifications() {
+    try {
+        const res = await fetchAPI('/api/notifications/ack-all', {
+            method: 'POST'
+        });
+        const json = await res.json();
+        if (json.success) {
+            (state.notifications || []).forEach(n => n.is_read = 1);
+            renderNotifications();
+            showAlert(`All notifications acknowledged (${json.acknowledged_count || 0}).`, 'success');
+        } else {
+            showAlert('Failed to acknowledge all notifications.', 'danger');
+        }
+    } catch (e) {
+        console.error('Failed to ack all notifications:', e);
     }
 }
 
@@ -1620,31 +1726,59 @@ function renderNotifications() {
     const flyoutCount = document.getElementById('flyout-count');
     const flyoutList = document.getElementById('flyout-notification-list');
 
-    const active = state.notifications || [];
+    const allNotifs = state.notifications || [];
+    const unreadCount = allNotifs.filter(n => !n.is_read).length;
+
     if (countBadge) {
-        if (active.length > 0) {
-            countBadge.textContent = active.length;
+        if (unreadCount > 0) {
+            countBadge.textContent = unreadCount;
             countBadge.classList.remove('hidden');
         } else {
             countBadge.classList.add('hidden');
         }
     }
 
-    if (flyoutCount) flyoutCount.textContent = `${active.length} alerts`;
+    if (flyoutCount) flyoutCount.textContent = `${unreadCount} unread`;
 
     if (flyoutList) {
-        if (active.length === 0) {
-            flyoutList.innerHTML = `<div class="text-center py-4 text-muted text-sm">No active alerts.</div>`;
+        // Apply category / read filter
+        let filtered = allNotifs;
+        const f = state.notifFilter || 'all';
+        if (f === 'unread') {
+            filtered = allNotifs.filter(n => !n.is_read);
+        } else if (f === 'maintenance') {
+            filtered = allNotifs.filter(n => (n.category || '').toLowerCase() === 'maintenance');
+        } else if (f === 'defects') {
+            filtered = allNotifs.filter(n => (n.category || '').toLowerCase() === 'inspection' || (n.category || '').toLowerCase() === 'defect');
+        } else if (f === 'work-orders') {
+            filtered = allNotifs.filter(n => (n.category || '').toLowerCase().includes('work_order'));
+        }
+
+        if (filtered.length === 0) {
+            flyoutList.innerHTML = `<div class="text-center py-4 text-muted text-sm">No notifications matching '${escapeHTML(f)}'.</div>`;
         } else {
-            flyoutList.innerHTML = active.map(n => `
-                <div class="notification-item-compact">
-                    <span class="status-indicator-dot" style="margin-top: 4px;"></span>
-                    <div>
-                        <div style="font-weight: 600; font-size: 12.5px; color: var(--text-primary);">${n.vehicle_reg}: ${n.service_name}</div>
-                        <div style="font-size: 11px; color: var(--text-muted);">${n.type} &bull; ${n.scheduled_at || ''}</div>
+            flyoutList.innerHTML = filtered.map(n => {
+                const sev = (n.severity || 'info').toLowerCase();
+                const unreadCls = !n.is_read ? 'unread' : '';
+                const sevCls = `severity-${sev}`;
+                return `
+                    <div class="notif-card-item ${unreadCls} ${sevCls}">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                                <span class="badge ${sev === 'critical' ? 'badge-danger' : (sev === 'warning' ? 'badge-warning' : 'badge-info')}" style="font-size: 10px; padding: 1px 5px;">${escapeHTML(n.severity || 'INFO')}</span>
+                                <span style="font-weight: 600; font-size: 12px; color: var(--text-primary);">${escapeHTML(n.title)}</span>
+                            </div>
+                            <div style="font-size: 11.5px; color: var(--text-secondary); line-height: 1.35; margin-bottom: 4px;">${escapeHTML(n.message)}</div>
+                            <div style="font-size: 10.5px; color: var(--text-muted);">${escapeHTML(n.created_at || 'Just now')}</div>
+                        </div>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                            ${!n.is_read ? `
+                                <button class="btn btn-xs btn-outline" style="font-size: 10px; padding: 2px 6px;" onclick="ackNotification('${escapeHTML(n.event_key)}')">Ack</button>
+                            ` : `<span class="text-xs text-muted" style="font-size: 10px;">Read</span>`}
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
     }
 }
@@ -1708,7 +1842,7 @@ function closeAllModals() {
 }
 
 function populateVehicleDropdowns() {
-    const selects = ['m-vehicle-id', 's-vehicle-id', 'e-vehicle-id'];
+    const selects = ['m-vehicle-id', 's-vehicle-id', 'e-vehicle-id', 'wo-vehicle-id', 'insp-vehicle-id'];
     selects.forEach(selId => {
         const el = document.getElementById(selId);
         if (!el) return;
@@ -2032,6 +2166,727 @@ function initForms() {
             showAlert('Server network error.', 'danger');
         }
     });
+
+    // Form: Create Work Order
+    document.getElementById('form-add-work-order')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+            vehicle_id: parseInt(document.getElementById('wo-vehicle-id').value, 10),
+            title: document.getElementById('wo-title').value.trim(),
+            description: document.getElementById('wo-description').value.trim(),
+            priority: document.getElementById('wo-priority').value,
+            assigned_to: document.getElementById('wo-assigned-to').value,
+            estimated_parts_cost: parseInt(document.getElementById('wo-est-parts').value, 10) || 0,
+            estimated_labour_cost: parseInt(document.getElementById('wo-est-labour').value, 10) || 0
+        };
+
+        try {
+            const res = await fetchAPI('/api/work-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if (json.success) {
+                showAlert(`Work Order #${json.work_order_number || json.id} created successfully.`, 'success');
+                closeModal('modal-work-order-add');
+                e.target.reset();
+                loadWorkOrders();
+                loadDashboard();
+            } else {
+                showAlert(json.message || 'Failed to create work order.', 'danger');
+            }
+        } catch (err) {
+            showAlert('Server network error.', 'danger');
+        }
+    });
+
+    // Form: Complete Work Order
+    document.getElementById('form-complete-wo')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const woId = parseInt(document.getElementById('wo-complete-id').value, 10);
+        const payload = {
+            action: 'complete',
+            id: woId,
+            odometer_km: parseInt(document.getElementById('wo-complete-odometer').value, 10) || 0,
+            workshop_name: document.getElementById('wo-complete-workshop').value.trim(),
+            labour_cost: parseInt(document.getElementById('wo-complete-labour').value, 10) || 0,
+            parts_cost: parseInt(document.getElementById('wo-complete-parts').value, 10) || 0,
+            notes: document.getElementById('wo-complete-notes').value.trim()
+        };
+
+        try {
+            const res = await fetchAPI('/api/work-orders', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if (json.success) {
+                showAlert('Work Order completed. Service history and expenses reconciled.', 'success');
+                closeModal('modal-work-order-detail');
+                loadWorkOrders();
+                loadMaintenance();
+                loadSchedules();
+                loadExpenses();
+                loadDashboard();
+                loadFleetAnalytics();
+            } else {
+                showAlert(json.message || 'Failed to complete work order.', 'danger');
+            }
+        } catch (err) {
+            showAlert('Server network error.', 'danger');
+        }
+    });
+
+    // Form: Submit Digital Inspection
+    document.getElementById('form-add-inspection')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const vehicleId = parseInt(document.getElementById('insp-vehicle-id').value, 10);
+        const inspectorName = document.getElementById('insp-inspector').value.trim();
+        const inspectionDate = document.getElementById('insp-date').value;
+        const odometerKm = parseInt(document.getElementById('insp-odometer').value, 10) || 0;
+        const notes = document.getElementById('insp-general-notes').value.trim();
+
+        const items = INSPECTION_ITEMS.map((def, idx) => {
+            const status = document.querySelector(`input[name="insp_item_${idx}"]:checked`)?.value || 'Pass';
+            const desc = status === 'Fail' ? (document.getElementById(`insp_defect_desc_${idx}`)?.value.trim() || 'Defect noted during inspection') : '';
+            const severity = status === 'Fail' ? (document.getElementById(`insp_defect_sev_${idx}`)?.value || 'Major') : 'None';
+            return {
+                item_name: def.name,
+                status: status,
+                defect_description: desc,
+                severity: severity
+            };
+        });
+
+        const payload = {
+            vehicle_id: vehicleId,
+            inspector_name: inspectorName,
+            inspection_date: inspectionDate,
+            odometer_km: odometerKm,
+            notes: notes,
+            items: items
+        };
+
+        try {
+            const res = await fetchAPI('/api/inspections', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if (json.success) {
+                showAlert(`Inspection recorded (${json.overall_status}). ${json.defects_found} defect(s) logged.`, json.overall_status === 'Pass' ? 'success' : 'warning');
+                closeModal('modal-inspection-add');
+                e.target.reset();
+                initInspectionChecklistForm();
+                loadInspections();
+                loadDefects();
+                loadDashboard();
+            } else {
+                showAlert(json.message || 'Failed to submit inspection.', 'danger');
+            }
+        } catch (err) {
+            showAlert('Server network error.', 'danger');
+        }
+    });
+}
+
+// ==========================================================================
+// 8.1 SMART FLEET MANAGEMENT: WORK ORDERS CONTROLLER
+// ==========================================================================
+async function loadWorkOrders() {
+    try {
+        const res = await fetchAPI('/api/work-orders');
+        const json = await res.json();
+        if (json.success && json.data) {
+            state.workOrders = json.data;
+            renderWorkOrdersTable();
+            updateNavigationBadges();
+        }
+    } catch (e) {
+        console.error('Failed to load work orders:', e);
+    }
+}
+
+function renderWorkOrdersTable() {
+    const tbody = document.getElementById('tbody-work-orders');
+    if (!tbody) return;
+
+    let items = state.workOrders || [];
+    const search = (document.getElementById('wo-search-input')?.value || '').toLowerCase().trim();
+    const statusFilter = document.getElementById('wo-status-filter')?.value || '';
+    const priorityFilter = document.getElementById('wo-priority-filter')?.value || '';
+
+    if (search) {
+        items = items.filter(w => 
+            (w.work_order_number && w.work_order_number.toLowerCase().includes(search)) ||
+            (w.vehicle_reg && w.vehicle_reg.toLowerCase().includes(search)) ||
+            (w.title && w.title.toLowerCase().includes(search)) ||
+            (w.assigned_to && w.assigned_to.toLowerCase().includes(search))
+        );
+    }
+    if (statusFilter) {
+        items = items.filter(w => w.status === statusFilter);
+    }
+    if (priorityFilter) {
+        items = items.filter(w => w.priority === priorityFilter);
+    }
+
+    if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No work orders match current filters.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = items.map(w => {
+        let pBadge = 'badge-priority-medium';
+        if (w.priority === 'Low') pBadge = 'badge-priority-low';
+        else if (w.priority === 'High') pBadge = 'badge-priority-high';
+        else if (w.priority === 'Critical') pBadge = 'badge-priority-critical';
+
+        let sBadge = 'badge-wo-open';
+        if (w.status === 'Assigned') sBadge = 'badge-wo-assigned';
+        else if (w.status === 'In Progress') sBadge = 'badge-wo-inprogress';
+        else if (w.status === 'Waiting for Parts') sBadge = 'badge-wo-waiting';
+        else if (w.status === 'Completed') sBadge = 'badge-wo-completed';
+        else if (w.status === 'Cancelled') sBadge = 'badge-wo-cancelled';
+
+        const totalCost = (w.actual_parts_cost || 0) + (w.actual_labour_cost || 0);
+        const costStr = totalCost > 0 ? `Rs. ${totalCost.toLocaleString()}` : `Est: Rs. ${((w.estimated_parts_cost || 0) + (w.estimated_labour_cost || 0)).toLocaleString()}`;
+
+        return `
+            <tr>
+                <td class="font-mono font-bold">${escapeHTML(w.work_order_number)}</td>
+                <td class="primary-cell">${escapeHTML(w.vehicle_reg)}</td>
+                <td>
+                    <div style="font-weight: 600; color: var(--text-primary);">${escapeHTML(w.title)}</div>
+                    <div style="font-size: 11px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(w.description)}</div>
+                </td>
+                <td><span class="badge ${pBadge}">${escapeHTML(w.priority)}</span></td>
+                <td><span class="badge ${sBadge}">${escapeHTML(w.status)}</span></td>
+                <td>${escapeHTML(w.assigned_to || 'Unassigned')}</td>
+                <td class="font-mono">${costStr}</td>
+                <td style="font-size: 11.5px;">${escapeHTML(w.updated_at || w.created_at)}</td>
+                <td class="text-right">
+                    <button class="btn btn-secondary btn-sm" onclick="openWorkOrderDetail(${w.id})">Manage</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openCreateWorkOrderModal() {
+    populateVehicleDropdowns();
+    openModal('modal-work-order-add');
+}
+
+async function openWorkOrderDetail(woId) {
+    const wo = (state.workOrders || []).find(w => w.id === woId);
+    if (!wo) return;
+    state.activeWorkOrder = wo;
+
+    document.getElementById('wo-detail-number').textContent = wo.work_order_number;
+    document.getElementById('wo-detail-subtitle').textContent = `${wo.vehicle_reg} &bull; ${wo.title}`;
+    document.getElementById('wo-detail-desc').textContent = wo.description;
+    document.getElementById('wo-detail-created').textContent = wo.created_at;
+    document.getElementById('wo-detail-tech').textContent = wo.assigned_to || 'Unassigned';
+    
+    const estTotal = (wo.estimated_labour_cost || 0) + (wo.estimated_parts_cost || 0);
+    document.getElementById('wo-detail-est').textContent = `Rs. ${estTotal.toLocaleString()} (Labour: ${wo.estimated_labour_cost}, Parts: ${wo.estimated_parts_cost})`;
+
+    // Status Badge
+    let sBadge = 'badge-wo-open';
+    if (wo.status === 'Assigned') sBadge = 'badge-wo-assigned';
+    else if (wo.status === 'In Progress') sBadge = 'badge-wo-inprogress';
+    else if (wo.status === 'Waiting for Parts') sBadge = 'badge-wo-waiting';
+    else if (wo.status === 'Completed') sBadge = 'badge-wo-completed';
+    else if (wo.status === 'Cancelled') sBadge = 'badge-wo-cancelled';
+    const statusBadgeEl = document.getElementById('wo-detail-status-badge');
+    if (statusBadgeEl) {
+        statusBadgeEl.className = `badge ${sBadge}`;
+        statusBadgeEl.textContent = wo.status;
+    }
+
+    // Priority Badge
+    let pBadge = 'badge-priority-medium';
+    if (wo.priority === 'Low') pBadge = 'badge-priority-low';
+    else if (wo.priority === 'High') pBadge = 'badge-priority-high';
+    else if (wo.priority === 'Critical') pBadge = 'badge-priority-critical';
+    const pBadgeEl = document.getElementById('wo-detail-priority-badge');
+    if (pBadgeEl) {
+        pBadgeEl.className = `badge ${pBadge}`;
+        pBadgeEl.textContent = wo.priority;
+    }
+
+    // Action buttons based on status
+    renderStatusActionButtons(wo);
+
+    // Hide completion form initially
+    document.getElementById('wo-completion-panel')?.classList.add('hidden');
+
+    // Load transition history
+    loadWorkOrderHistory(woId);
+
+    openModal('modal-work-order-detail');
+}
+
+function renderStatusActionButtons(wo) {
+    const container = document.getElementById('wo-transition-buttons');
+    if (!container) return;
+
+    const status = wo.status;
+    let buttons = '';
+
+    if (status === 'Open') {
+        buttons = `
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Assigned')">Assign Technician</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'In Progress')">Start Workshop Work</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Cancelled')">Cancel Work Order</button>
+        `;
+    } else if (status === 'Assigned') {
+        buttons = `
+            <button type="button" class="btn btn-primary btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'In Progress')">Start Workshop Work</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Waiting for Parts')">Hold: Waiting for Parts</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Cancelled')">Cancel Order</button>
+        `;
+    } else if (status === 'In Progress') {
+        buttons = `
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Waiting for Parts')">Hold: Waiting for Parts</button>
+            <button type="button" class="btn btn-primary btn-sm" style="background: #16A34A; border-color: #16A34A;" onclick="showWorkOrderCompletionForm(${wo.id})">Complete Work Order</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Cancelled')">Cancel Order</button>
+        `;
+    } else if (status === 'Waiting for Parts') {
+        buttons = `
+            <button type="button" class="btn btn-primary btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'In Progress')">Parts Received &mdash; Resume Work</button>
+            <button type="button" class="btn btn-primary btn-sm" style="background: #16A34A; border-color: #16A34A;" onclick="showWorkOrderCompletionForm(${wo.id})">Complete Work Order</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleUpdateWorkOrderStatus(${wo.id}, 'Cancelled')">Cancel Order</button>
+        `;
+    } else if (status === 'Completed') {
+        buttons = `<span class="badge badge-success" style="font-size: 12px; padding: 5px 12px;">Work Order Completed & Closed</span>`;
+    } else if (status === 'Cancelled') {
+        buttons = `<span class="badge badge-danger" style="font-size: 12px; padding: 5px 12px;">Work Order Cancelled</span>`;
+    }
+
+    container.innerHTML = buttons;
+}
+
+function showWorkOrderCompletionForm(woId) {
+    const panel = document.getElementById('wo-completion-panel');
+    if (!panel) return;
+    document.getElementById('wo-complete-id').value = woId;
+    
+    // Auto-fill vehicle current odometer if known
+    const wo = (state.workOrders || []).find(w => w.id === woId);
+    const v = (state.vehicles || []).find(veh => veh.id === wo?.vehicle_id);
+    document.getElementById('wo-complete-odometer').value = v ? (v.odometer_km || 0) : 0;
+    document.getElementById('wo-complete-labour').value = wo ? (wo.estimated_labour_cost || 0) : 0;
+    document.getElementById('wo-complete-parts').value = wo ? (wo.estimated_parts_cost || 0) : 0;
+    document.getElementById('wo-complete-notes').value = `Repairs completed according to work order specification ${wo?.work_order_number || ''}.`;
+
+    panel.classList.remove('hidden');
+    panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function handleUpdateWorkOrderStatus(woId, newStatus) {
+    try {
+        const res = await fetchAPI('/api/work-orders', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'update_status',
+                id: woId,
+                status: newStatus,
+                notes: `Transitioned to ${newStatus}`
+            })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showAlert(`Work Order status transitioned to ${newStatus}.`, 'success');
+            await loadWorkOrders();
+            openWorkOrderDetail(woId);
+            loadDashboard();
+        } else {
+            showAlert(json.message || 'Status transition rejected.', 'danger');
+        }
+    } catch (err) {
+        showAlert('Server communication error.', 'danger');
+    }
+}
+
+async function loadWorkOrderHistory(woId) {
+    const container = document.getElementById('wo-history-timeline');
+    if (!container) return;
+
+    try {
+        const res = await fetchAPI(`/api/work-orders/history?work_order_id=${woId}`);
+        const json = await res.json();
+        if (json.success && json.data && json.data.length > 0) {
+            container.innerHTML = json.data.map(h => `
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <strong>${escapeHTML(h.old_status)} &rarr; ${escapeHTML(h.new_status)}</strong>
+                        <div class="timeline-meta">${escapeHTML(h.changed_by)} &bull; ${escapeHTML(h.timestamp)}</div>
+                        ${h.notes ? `<div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">${escapeHTML(h.notes)}</div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<div class="text-center text-muted text-xs py-2">Initial order creation recorded.</div>';
+        }
+    } catch (e) {
+        container.innerHTML = '<div class="text-center text-muted text-xs py-2">History unavailable.</div>';
+    }
+}
+
+// ==========================================================================
+// 8.2 SMART FLEET MANAGEMENT: DIGITAL VEHICLE INSPECTION CONTROLLER
+// ==========================================================================
+const INSPECTION_ITEMS = [
+    { name: 'Brakes & Calipers', critical: true },
+    { name: 'Tyres & Tread Depth', critical: true },
+    { name: 'Lights, Indicators & Horn', critical: false },
+    { name: 'Engine & Exhaust Diagnostics', critical: true },
+    { name: 'Battery & Electrical System', critical: false },
+    { name: 'Steering & Suspension Alignment', critical: true },
+    { name: 'Fluid Levels (Oil/Coolant/Brake)', critical: false },
+    { name: 'Registration & Insurance Documents', critical: false }
+];
+
+function initInspectionChecklistForm() {
+    const tbody = document.getElementById('insp-checklist-tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = INSPECTION_ITEMS.map((item, idx) => `
+        <tr class="checklist-row">
+            <td>
+                <strong>${escapeHTML(item.name)}</strong>
+                ${item.critical ? '<span class="badge badge-danger" style="margin-left: 4px; font-size: 10px; padding: 1px 4px;">Critical</span>' : ''}
+            </td>
+            <td>
+                <div class="checklist-radio-group">
+                    <label><input type="radio" name="insp_item_${idx}" value="Pass" checked onchange="toggleDefectInput(${idx})" /> Pass</label>
+                    <label><input type="radio" name="insp_item_${idx}" value="Fail" onchange="toggleDefectInput(${idx})" /> <span style="color: #DC2626; font-weight: 600;">Fail</span></label>
+                    <label><input type="radio" name="insp_item_${idx}" value="N/A" onchange="toggleDefectInput(${idx})" /> N/A</label>
+                </div>
+            </td>
+            <td>
+                <div id="insp_defect_box_${idx}" class="hidden" style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="insp_defect_desc_${idx}" placeholder="Describe specific mechanical defect..." style="flex: 1; height: 30px; font-size: 12px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--border-color);" />
+                    <select id="insp_defect_sev_${idx}" style="height: 30px; font-size: 12px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--border-color);">
+                        <option value="Minor">Minor</option>
+                        <option value="Major" selected>Major</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function toggleDefectInput(idx) {
+    const selected = document.querySelector(`input[name="insp_item_${idx}"]:checked`)?.value;
+    const box = document.getElementById(`insp_defect_box_${idx}`);
+    if (box) {
+        if (selected === 'Fail') {
+            box.classList.remove('hidden');
+        } else {
+            box.classList.add('hidden');
+        }
+    }
+}
+
+async function loadInspections() {
+    try {
+        const res = await fetchAPI('/api/inspections');
+        const json = await res.json();
+        if (json.success && json.data) {
+            state.inspections = json.data;
+            renderInspectionsTable();
+            updateNavigationBadges();
+        }
+    } catch (e) {
+        console.error('Failed to load inspections:', e);
+    }
+}
+
+function renderInspectionsTable() {
+    const tbody = document.getElementById('tbody-inspections');
+    if (!tbody) return;
+
+    let items = state.inspections || [];
+    const statusFilter = document.getElementById('insp-status-filter')?.value || '';
+    if (statusFilter) {
+        items = items.filter(i => i.overall_status === statusFilter);
+    }
+
+    if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No inspection records found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = items.map(i => {
+        let badge = 'badge-insp-pass';
+        if (i.overall_status === 'Defective') badge = 'badge-insp-defective';
+        else if (i.overall_status === 'Fail') badge = 'badge-insp-fail';
+
+        return `
+            <tr>
+                <td class="font-mono font-bold">#INSP-${i.id}</td>
+                <td class="primary-cell">${escapeHTML(i.vehicle_reg)}</td>
+                <td>${escapeHTML(i.inspector_name)}</td>
+                <td>${escapeHTML(i.inspection_date)}</td>
+                <td class="font-mono">${(i.odometer_km || 0).toLocaleString()} km</td>
+                <td><span class="badge ${badge}">${escapeHTML(i.overall_status)}</span></td>
+                <td>
+                    ${i.defects_found > 0 ? 
+                        `<span class="badge badge-danger">${i.defects_found} defect(s)</span>` : 
+                        `<span class="text-muted text-xs">Zero defects</span>`}
+                </td>
+                <td class="text-right">
+                    <button class="btn btn-secondary btn-sm" onclick="openInspectionDetail(${i.id})">View Checklist</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function loadDefects() {
+    try {
+        const res = await fetchAPI('/api/inspections/defects');
+        const json = await res.json();
+        if (json.success && json.data) {
+            state.defects = json.data;
+            renderUnresolvedDefects();
+            updateNavigationBadges();
+        }
+    } catch (e) {
+        console.error('Failed to load defects:', e);
+    }
+}
+
+function renderUnresolvedDefects() {
+    const container = document.getElementById('inspection-defects-container');
+    if (!container) return;
+
+    const defects = state.defects || [];
+    if (defects.length === 0) {
+        container.innerHTML = '<div class="text-muted text-sm py-2">No active unresolved defects. Fleet safety criteria met.</div>';
+        return;
+    }
+
+    container.innerHTML = defects.map(d => `
+        <div class="defect-card">
+            <div>
+                <div class="defect-info-title">
+                    <span>${escapeHTML(d.vehicle_reg)} &mdash; ${escapeHTML(d.item_name)}</span>
+                    <span class="badge badge-danger">${escapeHTML(d.severity || 'Critical')}</span>
+                </div>
+                <div class="defect-info-desc">
+                    ${escapeHTML(d.defect_description)} &bull; Logged ${escapeHTML(d.inspection_date)} by ${escapeHTML(d.inspector_name)}
+                </div>
+            </div>
+            <div>
+                <button class="btn btn-danger btn-sm" onclick="handleCreateWorkOrderFromDefect(${d.inspection_id}, ${d.item_index})">
+                    Create Repair Work Order
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function openCreateInspectionModal() {
+    populateVehicleDropdowns();
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('insp-date').value = today;
+    initInspectionChecklistForm();
+    openModal('modal-inspection-add');
+}
+
+function openInspectionDetail(inspId) {
+    const insp = (state.inspections || []).find(i => i.id === inspId);
+    if (!insp) return;
+
+    document.getElementById('insp-detail-title').textContent = `Inspection #INSP-${insp.id} &bull; ${insp.vehicle_reg}`;
+    document.getElementById('insp-detail-subtitle').textContent = `Conducted by ${insp.inspector_name} on ${insp.inspection_date}`;
+    document.getElementById('insp-detail-odometer').textContent = `${(insp.odometer_km || 0).toLocaleString()} km`;
+    document.getElementById('insp-detail-defects-count').textContent = insp.defects_found || 0;
+
+    let badge = 'badge-insp-pass';
+    if (insp.overall_status === 'Defective') badge = 'badge-insp-defective';
+    else if (insp.overall_status === 'Fail') badge = 'badge-insp-fail';
+    const statusEl = document.getElementById('insp-detail-status-badge');
+    if (statusEl) {
+        statusEl.className = `badge ${badge}`;
+        statusEl.textContent = insp.overall_status;
+    }
+
+    const tbody = document.getElementById('tbody-inspection-items-detail');
+    if (tbody && insp.items) {
+        tbody.innerHTML = insp.items.map((item, idx) => {
+            const isFail = item.status === 'Fail';
+            return `
+                <tr>
+                    <td class="font-bold">${escapeHTML(item.item_name)}</td>
+                    <td>
+                        <span class="badge ${isFail ? 'badge-danger' : (item.status === 'Pass' ? 'badge-success' : 'badge-muted')}">
+                            ${escapeHTML(item.status)}
+                        </span>
+                    </td>
+                    <td>${item.severity !== 'None' ? `<span class="badge badge-warning">${escapeHTML(item.severity)}</span>` : '-'}</td>
+                    <td style="font-size: 12px;">${escapeHTML(item.defect_description || '-')}</td>
+                    <td class="text-right">
+                        ${isFail ? `
+                            <button class="btn btn-outline btn-sm" onclick="handleCreateWorkOrderFromDefect(${insp.id}, ${idx})">
+                                Create Work Order
+                            </button>
+                        ` : '<span class="text-muted text-xs">&mdash;</span>'}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    openModal('modal-inspection-detail');
+}
+
+async function handleCreateWorkOrderFromDefect(inspId, itemIndex) {
+    if (!confirm('Escalate this flagged defect to an active workshop Work Order?')) return;
+
+    try {
+        const res = await fetchAPI('/api/inspections/create-work-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                inspection_id: inspId,
+                item_index: itemIndex,
+                assigned_to: 'Amit Patil (Brakes & Suspension)'
+            })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showAlert(`Repair Work Order created: ${json.work_order_number || ('#' + json.work_order_id)}`, 'success');
+            closeModal('modal-inspection-detail');
+            await loadDefects();
+            await loadWorkOrders();
+            loadDashboard();
+            switchTab('work-orders');
+        } else {
+            showAlert(json.message || 'Failed to create work order from defect.', 'danger');
+        }
+    } catch (err) {
+        showAlert('Server network error.', 'danger');
+    }
+}
+
+// ==========================================================================
+// 8.3 SMART FLEET MANAGEMENT: COST ANALYTICS CONTROLLER
+// ==========================================================================
+async function loadFleetAnalytics() {
+    try {
+        const res = await fetchAPI('/api/analytics');
+        const json = await res.json();
+        if (json.success && json.analytics) {
+            state.analytics = json.analytics;
+            renderAnalyticsDashboard(json.analytics);
+        }
+    } catch (e) {
+        console.error('Failed to load fleet analytics:', e);
+    }
+}
+
+function renderAnalyticsDashboard(a) {
+    if (!a) return;
+
+    // KPI Cards
+    const maintEl = document.getElementById('analytics-total-maint');
+    if (maintEl) maintEl.textContent = `Rs. ${(a.total_maintenance_cost || 0).toLocaleString()}`;
+    const expEl = document.getElementById('analytics-total-expenses');
+    if (expEl) expEl.textContent = `Rs. ${(a.total_operating_expenses || 0).toLocaleString()}`;
+    const spendEl = document.getElementById('analytics-total-spend');
+    if (spendEl) spendEl.textContent = `Rs. ${(a.total_fleet_spend || 0).toLocaleString()}`;
+    const avgEl = document.getElementById('analytics-avg-service');
+    if (avgEl) avgEl.textContent = `Rs. ${Math.round(a.average_service_cost || 0).toLocaleString()}`;
+
+    // Efficiency Metrics
+    const totalWoEl = document.getElementById('stat-wo-total');
+    if (totalWoEl) totalWoEl.textContent = (a.open_work_orders || 0) + (a.completed_work_orders || 0);
+    const openWoEl = document.getElementById('stat-wo-open');
+    if (openWoEl) openWoEl.textContent = a.open_work_orders || 0;
+    const compWoEl = document.getElementById('stat-wo-completed');
+    if (compWoEl) compWoEl.textContent = a.completed_work_orders || 0;
+
+    // Preventive Schedule Compliance
+    const totalSchedules = (a.upcoming_maintenance || 0) + (a.overdue_maintenance || 0);
+    const compliancePct = totalSchedules > 0 ? Math.max(0, Math.round(((totalSchedules - a.overdue_maintenance) / totalSchedules) * 100)) : 100;
+    const compPctEl = document.getElementById('stat-compliance-pct');
+    if (compPctEl) compPctEl.textContent = `${compliancePct}%`;
+
+    // Category Breakdown Bars
+    const catContainer = document.getElementById('analytics-category-container');
+    if (catContainer && a.categories) {
+        const totalCatSpend = a.categories.reduce((acc, c) => acc + (c.total_amount || 0), 0) || 1;
+        catContainer.innerHTML = a.categories.map(c => {
+            const pct = Math.min(100, Math.round(((c.total_amount || 0) / totalCatSpend) * 100));
+            return `
+                <div class="category-bar-row">
+                    <div class="category-bar-label">
+                        <span>${escapeHTML(c.category)} (${c.record_count} services)</span>
+                        <span class="font-bold">Rs. ${(c.total_amount || 0).toLocaleString()} (${pct}%)</span>
+                    </div>
+                    <div class="category-bar-track">
+                        <div class="category-bar-fill" style="width: ${pct}%; background-color: var(--primary);"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Top 5 Vehicles
+    const topVBody = document.getElementById('tbody-top-vehicles');
+    if (topVBody && a.top_vehicles) {
+        if (a.top_vehicles.length === 0) {
+            topVBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">No maintenance recorded yet.</td></tr>';
+        } else {
+            topVBody.innerHTML = a.top_vehicles.map(v => `
+                <tr>
+                    <td class="font-mono font-bold">${escapeHTML(v.registration_number)}</td>
+                    <td>${escapeHTML(v.make)} ${escapeHTML(v.model)}</td>
+                    <td class="font-mono font-bold text-right">Rs. ${(v.total_maintenance || 0).toLocaleString()}</td>
+                </tr>
+            `).join('');
+        }
+    }
+
+    // Monthly Spend
+    const monthBody = document.getElementById('tbody-monthly-spending');
+    if (monthBody && a.monthly_spending) {
+        if (a.monthly_spending.length === 0) {
+            monthBody.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-3">No expenditure recorded yet.</td></tr>';
+        } else {
+            monthBody.innerHTML = a.monthly_spending.map(m => `
+                <tr>
+                    <td class="font-bold">${escapeHTML(m.month)}</td>
+                    <td class="font-mono font-bold text-right">Rs. ${(m.total_amount || 0).toLocaleString()}</td>
+                </tr>
+            `).join('');
+        }
+    }
+}
+
+function updateNavigationBadges() {
+    const openWOs = (state.workOrders || []).filter(w => w.status !== 'Completed' && w.status !== 'Cancelled').length;
+    const badgeWO = document.getElementById('nav-badge-work-orders');
+    if (badgeWO) badgeWO.textContent = openWOs;
+
+    const openDefects = (state.defects || []).length;
+    const badgeInsp = document.getElementById('nav-badge-inspections');
+    if (badgeInsp) {
+        badgeInsp.textContent = openDefects;
+        if (openDefects > 0) badgeInsp.classList.add('danger');
+        else badgeInsp.classList.remove('danger');
+    }
 }
 
 // ==========================================================================
@@ -2144,16 +2999,18 @@ async function triggerHotBackup() {
 
 async function runDsaBenchmarks() {
     try {
-        showAlert('Executing C11 core data structures and optimization algorithms...', 'info');
+        showAlert('Executing pure C11 data structures and optimization algorithms...', 'info');
         const res = await fetchAPI('/api/dsa/run');
         const json = await res.json();
         if (json.success && json.algorithms) {
             const a = json.algorithms;
-            document.getElementById('dsa-ht-metric').textContent = `Indexed: ${a.hash_table.vehicles_indexed} vehicles (${a.hash_table.complexity})`;
-            document.getElementById('dsa-dijkstra-metric').textContent = `${a.dijkstra.route} (${a.dijkstra.shortest_dist_km} km)`;
-            document.getElementById('dsa-knapsack-metric').textContent = `Max: ${a.dp_knapsack.max_reliability_score} pts (${a.dp_knapsack.jobs_selected} jobs)`;
-            document.getElementById('dsa-tsp-metric').textContent = `Tour: ${a.tsp_branch_bound.optimal_tour_distance_km} km`;
-            showAlert('C11 DSA Algorithm Benchmarks completed successfully.', 'success');
+            if (a.hash_table) document.getElementById('dsa-ht-metric').textContent = `Indexed: ${a.hash_table.vehicles_indexed} vehicles (${a.hash_table.complexity})`;
+            if (a.dijkstra) document.getElementById('dsa-dijkstra-metric').textContent = `${a.dijkstra.route} (${a.dijkstra.shortest_dist_km} km)`;
+            if (a.dp_knapsack) document.getElementById('dsa-knapsack-metric').textContent = `Max Score: ${a.dp_knapsack.max_reliability_score} pts (${a.dp_knapsack.jobs_selected} jobs)`;
+            if (a.tsp_branch_bound) document.getElementById('dsa-tsp-metric').textContent = `Tour: ${a.tsp_branch_bound.optimal_tour_distance_km} km`;
+            if (a.merge_sort) document.getElementById('dsa-mergesort-metric').textContent = `Sorted: ${a.merge_sort.items_sorted} assets (${a.merge_sort.complexity})`;
+            if (a.queue) document.getElementById('dsa-queue-metric').textContent = `Dispatched: ${a.queue.tasks_dispatched} tasks (${a.queue.complexity})`;
+            showAlert('C11 DSA Algorithm Suite benchmarks executed in memory.', 'success');
         }
     } catch (e) {
         showAlert('Failed to execute DSA benchmarks.', 'danger');
@@ -2307,4 +3164,395 @@ async function handleLoginSubmit(e) {
             errBox.classList.remove('hidden');
         }
     }
+}
+
+// ==========================================================================
+// LIVE FLEET MONITORING & TELEMETRY ENGINE
+// ==========================================================================
+
+function initLiveMonitoring() {
+    const pollSelect = document.getElementById('poll-interval-select');
+    if (pollSelect) {
+        pollSelect.addEventListener('change', (e) => {
+            const ms = parseInt(e.target.value, 10);
+            state.pollIntervalMs = ms;
+            restartPollingTimer();
+            showAlert(`Polling interval set to ${ms > 0 ? (ms/1000) + 's' : 'Manual (Off)'}.`, 'info');
+        });
+    }
+
+    document.getElementById('btn-retry-live-refresh')?.addEventListener('click', () => {
+        loadLiveMonitoringStatus();
+    });
+
+    // Start background polling
+    restartPollingTimer();
+}
+
+function restartPollingTimer() {
+    if (state.pollTimerId) {
+        clearInterval(state.pollTimerId);
+        state.pollTimerId = null;
+    }
+    if (state.pollIntervalMs > 0) {
+        state.pollTimerId = setInterval(() => {
+            loadLiveMonitoringStatus();
+        }, state.pollIntervalMs);
+    }
+}
+
+async function loadLiveMonitoringStatus() {
+    if (state.isLivePolling) return; // Prevent overlapping requests
+    state.isLivePolling = true;
+
+    const dot = document.getElementById('live-indicator-dot');
+    const refreshText = document.getElementById('live-last-refresh');
+    const staleBanner = document.getElementById('stale-data-banner');
+    const refreshBtn = document.getElementById('btn-refresh-data');
+
+    if (refreshBtn) refreshBtn.classList.add('btn-spin');
+
+    try {
+        const res = await fetchAPI('/api/live-status');
+        if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+        const json = await res.json();
+        if (json.success) {
+            state.lastSuccessfulSync = new Date();
+            const timeStr = state.lastSuccessfulSync.toLocaleTimeString();
+
+            if (dot) {
+                dot.classList.add('pulse');
+                dot.classList.remove('stale');
+                dot.title = `Live C11 Engine Connected (Uptime: ${json.uptime_seconds || 0}s)`;
+            }
+            if (refreshText) refreshText.textContent = timeStr;
+            if (staleBanner) staleBanner.classList.add('hidden');
+
+            // Sync notifications in background
+            if (json.notifications && Array.isArray(json.notifications)) {
+                state.notifications = json.notifications;
+                renderNotifications();
+            }
+        } else {
+            throw new Error(json.message || 'Unknown response');
+        }
+    } catch (e) {
+        console.warn('Live monitoring refresh failure:', e);
+        if (dot) {
+            dot.classList.remove('pulse');
+            dot.classList.add('stale');
+            dot.title = 'Telemetry Connection Offline / Stale';
+        }
+        if (staleBanner) staleBanner.classList.remove('hidden');
+    } finally {
+        state.isLivePolling = false;
+        if (refreshBtn) refreshBtn.classList.remove('btn-spin');
+    }
+}
+
+// ==========================================================================
+// DEMONSTRATION MODE CONTROLS
+// ==========================================================================
+
+async function checkDemoStatus() {
+    try {
+        const res = await fetchAPI('/api/demo/status');
+        const json = await res.json();
+        if (json.success && json.is_demo_mode) {
+            state.isDemoMode = true;
+            state.demoDatabasePath = json.database_path;
+
+            const banner = document.getElementById('demo-mode-banner');
+            const pathEl = document.getElementById('demo-db-path');
+            if (banner) banner.classList.remove('hidden');
+            if (pathEl) pathEl.textContent = json.database_path || 'data/demo_fleet.db';
+
+            document.getElementById('btn-reset-demo-data')?.addEventListener('click', handleResetDemoData);
+        }
+    } catch (e) {
+        console.warn('Demo status check failed:', e);
+    }
+}
+
+async function handleResetDemoData() {
+    if (!confirm("Are you sure you want to reset the academic demonstration database?\n\nThis will re-seed data/demo_fleet.db with pristine vehicles, drivers, schedules, work orders, and inspections.\nThe production database 'data/fleet.db' will NOT be touched.")) {
+        return;
+    }
+    try {
+        showAlert('Resetting demo database with pristine records...', 'info');
+        const res = await fetchAPI('/api/demo/reset', { method: 'POST' });
+        const json = await res.json();
+        if (json.success) {
+            showAlert('Demonstration database reset successfully.', 'success');
+            await loadAllData();
+        } else {
+            showAlert('Demo reset failed: ' + (json.message || ''), 'danger');
+        }
+    } catch (e) {
+        console.error('Demo reset error:', e);
+        showAlert('Error requesting demo reset.', 'danger');
+    }
+}
+
+// ==========================================================================
+// NOTIFICATION CENTER CONTROLS
+// ==========================================================================
+
+function initNotificationCenter() {
+    // Filter buttons in flyout
+    document.querySelectorAll('.notif-filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.notif-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.notifFilter = btn.getAttribute('data-filter') || 'all';
+            renderNotifications();
+        });
+    });
+
+    document.getElementById('btn-ack-all-notifs')?.addEventListener('click', () => {
+        ackAllNotifications();
+    });
+}
+
+// ==========================================================================
+// OPERATIONAL DSA INTEGRATION
+// ==========================================================================
+
+function initDsaOperations() {
+    // 1. Vehicle Hash Table Lookup O(1)
+    const btnLookup = document.getElementById('btn-hash-lookup');
+    const inputLookup = document.getElementById('vehicle-hash-lookup-input');
+    if (btnLookup && inputLookup) {
+        const doLookup = async () => {
+            const reg = inputLookup.value.trim();
+            if (!reg) return;
+            const resEl = document.getElementById('hash-lookup-result');
+            if (resEl) resEl.innerHTML = '<span class="text-muted">Searching DJB2 hash index...</span>';
+
+            try {
+                const res = await fetchAPI(`/api/vehicles/lookup?reg=${encodeURIComponent(reg)}`);
+                const json = await res.json();
+                if (json.success && json.vehicle) {
+                    const v = json.vehicle;
+                    if (resEl) {
+                        resEl.innerHTML = `<span class="text-success font-bold">&#10003; Found:</span> <strong>${escapeHTML(v.registration_number)}</strong> (${escapeHTML(v.make)} ${escapeHTML(v.model)}, ${v.odometer_km} km) &bull; Status: <span class="badge badge-info">${escapeHTML(v.status)}</span> <span class="badge badge-success">O(1)</span>`;
+                    }
+                    // Filter vehicles table to match
+                    const vSearch = document.getElementById('vehicle-search-input');
+                    if (vSearch) {
+                        vSearch.value = v.registration_number;
+                        state.searchTerm = v.registration_number.toLowerCase();
+                        state.currentPage = 1;
+                        renderVehiclesTable();
+                    }
+                } else {
+                    if (resEl) resEl.innerHTML = `<span class="text-danger">&#10007; ${escapeHTML(json.message || 'No vehicle found')} (Checked all hash buckets)</span>`;
+                }
+            } catch (e) {
+                if (resEl) resEl.innerHTML = `<span class="text-danger">Lookup error</span>`;
+            }
+        };
+
+        btnLookup.addEventListener('click', doLookup);
+        inputLookup.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                doLookup();
+            }
+        });
+    }
+
+    // 2. Work Order Undo (Stack O(1))
+    document.getElementById('btn-undo-wo-status')?.addEventListener('click', async () => {
+        if (!confirm('Revert the last work-order status change using the C11 Undo Stack?\n\nNote: Financial transitions on Completed orders cannot be reverted.')) {
+            return;
+        }
+        try {
+            const res = await fetchAPI('/api/work-orders/undo', { method: 'POST' });
+            const json = await res.json();
+            if (json.success) {
+                showAlert(`Status Reverted: ${json.message}`, 'success');
+                await loadWorkOrders();
+            } else {
+                showAlert(`Undo Rejected: ${json.message || 'No reversible operations in stack'}`, 'warning');
+            }
+        } catch (e) {
+            showAlert('Failed to process undo request.', 'danger');
+        }
+    });
+
+    // 3. Work Order FIFO Queue Dispatcher
+    document.getElementById('btn-view-wo-queue')?.addEventListener('click', async () => {
+        openModal('modal-wo-queue');
+        const tbody = document.getElementById('tbody-wo-queue');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Fetching FIFO dispatch queue from C11 memory...</td></tr>';
+
+        try {
+            const res = await fetchAPI('/api/work-orders/dispatch-queue');
+            const json = await res.json();
+            if (json.success && json.queue && tbody) {
+                if (json.queue.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Workshop queue is empty.</td></tr>';
+                } else {
+                    tbody.innerHTML = json.queue.map(q => `
+                        <tr>
+                            <td class="font-mono text-center"><strong>#${q.queue_position}</strong></td>
+                            <td class="font-mono font-bold">${escapeHTML(q.wo_number)}</td>
+                            <td class="primary-cell">${escapeHTML(q.vehicle_reg)}</td>
+                            <td>${escapeHTML(q.description)}</td>
+                            <td><span class="badge ${q.priority === 'Critical' ? 'badge-danger' : (q.priority === 'High' ? 'badge-warning' : 'badge-info')}">${escapeHTML(q.priority)}</span></td>
+                            <td><span class="badge badge-muted">${escapeHTML(q.status)}</span></td>
+                        </tr>
+                    `).join('');
+                }
+            }
+        } catch (e) {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Error loading workshop queue.</td></tr>';
+        }
+    });
+
+    // 4. Merge Sort Fleet Ranking Engine
+    document.getElementById('btn-run-ranking-sort')?.addEventListener('click', async () => {
+        const sortBy = document.getElementById('select-ranking-sort-by')?.value || 'odometer';
+        const tbody = document.getElementById('tbody-ranking-sort');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Executing C11 Merge Sort (O(N log N))...</td></tr>';
+
+        try {
+            const res = await fetchAPI(`/api/analytics/rankings?sort_by=${encodeURIComponent(sortBy)}`);
+            const json = await res.json();
+            if (json.success && json.rankings && tbody) {
+                tbody.innerHTML = json.rankings.map(r => `
+                    <tr>
+                        <td class="font-mono text-center"><strong>#${r.rank}</strong></td>
+                        <td class="primary-cell">${escapeHTML(r.registration)}</td>
+                        <td>${escapeHTML(r.make_model)}</td>
+                        <td class="font-bold">${escapeHTML(r.metric_display)}</td>
+                        <td><span class="badge badge-info">${escapeHTML(r.status)}</span></td>
+                    </tr>
+                `).join('');
+            }
+        } catch (e) {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Failed to run merge sort.</td></tr>';
+        }
+    });
+
+    // 5. Interactive C11 DSA Lab Workbench
+    const algoSelect = document.getElementById('dsa-lab-algo-select');
+    if (algoSelect) {
+        algoSelect.addEventListener('change', (e) => {
+            const v = e.target.value;
+            document.querySelectorAll('.dsa-algo-controls').forEach(el => el.classList.add('hidden'));
+            const ctrl = document.getElementById(`dsa-ctrl-${v}`);
+            if (ctrl) ctrl.classList.remove('hidden');
+        });
+    }
+
+    // Run Dijkstra
+    document.getElementById('btn-dsa-run-dijkstra')?.addEventListener('click', async () => {
+        const from = document.getElementById('dsa-dijkstra-from')?.value || 'Central Depot';
+        const to = document.getElementById('dsa-dijkstra-to')?.value || 'Port Facility';
+        const out = document.getElementById('dsa-lab-output');
+        const title = document.getElementById('dsa-output-title');
+        const comp = document.getElementById('dsa-output-complexity');
+
+        if (title) title.textContent = `Dijkstra Shortest Path: ${from} -> ${to}`;
+        if (comp) comp.textContent = 'O((V + E) log V)';
+        if (out) out.textContent = 'Running Dijkstra algorithm in pure C11 graph memory...';
+
+        try {
+            const res = await fetchAPI(`/api/routes/plan?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+            const json = await res.json();
+            if (out) out.textContent = JSON.stringify(json, null, 2);
+        } catch (e) {
+            if (out) out.textContent = 'Error computing route: ' + e;
+        }
+    });
+
+    // Run Knapsack
+    document.getElementById('btn-dsa-run-knapsack')?.addEventListener('click', async () => {
+        const budget = parseInt(document.getElementById('dsa-knapsack-budget')?.value || '18000', 10);
+        const out = document.getElementById('dsa-lab-output');
+        const title = document.getElementById('dsa-output-title');
+        const comp = document.getElementById('dsa-output-complexity');
+
+        if (title) title.textContent = `Dynamic Programming 0-1 Knapsack (Budget: Rs. ${budget})`;
+        if (comp) comp.textContent = 'O(N * B) Pseudo-polynomial';
+        if (out) out.textContent = 'Computing optimal maintenance job subset in C DP table...';
+
+        try {
+            const res = await fetchAPI('/api/optimization/knapsack', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ budget_ceiling: budget })
+            });
+            const json = await res.json();
+            if (out) out.textContent = JSON.stringify(json, null, 2);
+        } catch (e) {
+            if (out) out.textContent = 'Error running knapsack optimization: ' + e;
+        }
+    });
+
+    // Run TSP
+    document.getElementById('btn-dsa-run-tsp')?.addEventListener('click', async () => {
+        const stops = parseInt(document.getElementById('dsa-tsp-stops')?.value || '4', 10);
+        const out = document.getElementById('dsa-lab-output');
+        const title = document.getElementById('dsa-output-title');
+        const comp = document.getElementById('dsa-output-complexity');
+
+        if (title) title.textContent = `Branch & Bound TSP Depot Tour (${stops} Hubs)`;
+        if (comp) comp.textContent = 'O(N!) Pruned State-Space';
+        if (out) out.textContent = 'Executing Branch & Bound circuit optimizer in C memory...';
+
+        try {
+            const res = await fetchAPI('/api/optimization/tsp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ num_stops: stops })
+            });
+            const json = await res.json();
+            if (out) out.textContent = JSON.stringify(json, null, 2);
+        } catch (e) {
+            if (out) out.textContent = 'Error running TSP: ' + e;
+        }
+    });
+
+    // Run Hash Lookup from Lab
+    document.getElementById('btn-dsa-run-lookup')?.addEventListener('click', async () => {
+        const reg = document.getElementById('dsa-lookup-reg')?.value || 'MH-01-AB-1001';
+        const out = document.getElementById('dsa-lab-output');
+        const title = document.getElementById('dsa-output-title');
+        const comp = document.getElementById('dsa-output-complexity');
+
+        if (title) title.textContent = `DJB2 Hash Table Lookup: "${reg}"`;
+        if (comp) comp.textContent = 'O(1) Average';
+        if (out) out.textContent = 'Querying normalized DJB2 hash buckets...';
+
+        try {
+            const res = await fetchAPI(`/api/vehicles/lookup?reg=${encodeURIComponent(reg)}`);
+            const json = await res.json();
+            if (out) out.textContent = JSON.stringify(json, null, 2);
+        } catch (e) {
+            if (out) out.textContent = 'Error executing lookup: ' + e;
+        }
+    });
+
+    // Run Merge Sort from Lab
+    document.getElementById('btn-dsa-run-mergesort')?.addEventListener('click', async () => {
+        const key = document.getElementById('dsa-mergesort-key')?.value || 'odometer';
+        const out = document.getElementById('dsa-lab-output');
+        const title = document.getElementById('dsa-output-title');
+        const comp = document.getElementById('dsa-output-complexity');
+
+        if (title) title.textContent = `C11 Merge Sort by: ${key}`;
+        if (comp) comp.textContent = 'O(N log N) Stable';
+        if (out) out.textContent = 'Sorting vehicles in C memory...';
+
+        try {
+            const res = await fetchAPI(`/api/analytics/rankings?sort_by=${encodeURIComponent(key)}`);
+            const json = await res.json();
+            if (out) out.textContent = JSON.stringify(json, null, 2);
+        } catch (e) {
+            if (out) out.textContent = 'Error running merge sort: ' + e;
+        }
+    });
 }

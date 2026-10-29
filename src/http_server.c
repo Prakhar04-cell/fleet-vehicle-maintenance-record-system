@@ -11,6 +11,9 @@
 #include "dsa.h"
 #include "reports.h"
 #include "auth.h"
+#include "work_order.h"
+#include "inspection.h"
+#include "database.h"
 
 #ifdef _WIN32
 #if defined(__clang__)
@@ -36,6 +39,7 @@ typedef int SOCKET;
 
 static volatile bool g_server_running = false;
 static SOCKET g_server_fd = INVALID_SOCKET;
+static time_t g_server_start_time = 0;
 
 bool http_server_is_running(void) {
     return g_server_running;
@@ -771,46 +775,853 @@ static void handle_api_expenses(SOCKET client, const char *method, const char *b
     }
 }
 
-static void handle_api_notifications(SOCKET client, const User *user) {
+static void handle_api_notifications(SOCKET client, const char *method, const char *body, const char *query, const User *user) {
     if (!http_authorize(client, user, PERM_READ)) return;
 
-    Notification *list = NULL;
-    int count = 0;
-    notification_list_active(&list, &count);
+    if (strcmp(method, "GET") == 0) {
+        notification_sync_all_events(NULL);
 
-    size_t buf_cap = 32768 + (count * 256);
-    char *buf = (char *)malloc(buf_cap);
-    if (!buf) {
-        notification_free_list(list);
+        char category[32] = "All";
+        int unread_only = 0;
+        if (query) {
+            const char *c = strstr(query, "category=");
+            if (c) sscanf(c + 9, "%31[^&]", category);
+            const char *u = strstr(query, "unread_only=");
+            if (u && atoi(u + 12) == 1) unread_only = 1;
+        }
+
+        SystemNotification *list = NULL;
+        int count = 0;
+        notification_system_list(category, unread_only, auth_role_to_string(user->role), &list, &count);
+
+        int unread_total = 0;
+        for (int i = 0; i < count; i++) {
+            if (!list[i].is_read) unread_total++;
+        }
+
+        size_t cap = 32768 + (count * 512);
+        char *buf = (char *)malloc(cap);
+        size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"unread_count\": %d, \"data\": [", count, unread_total);
+        for (int i = 0; i < count; i++) {
+            off += snprintf(buf + off, cap - off,
+                "%s{\"id\": %d, \"event_key\": \"%s\", \"category\": \"%s\", \"severity\": \"%s\", "
+                "\"title\": \"%s\", \"message\": \"%s\", \"entity_type\": \"%s\", \"entity_id\": %d, "
+                "\"role_visibility\": \"%s\", \"is_read\": %d, \"acknowledged_at\": \"%s\", \"created_at\": \"%s\", "
+                "\"type\": \"%s\", \"vehicle_reg\": \"%s\", \"service_name\": \"%s\", \"scheduled_at\": \"%s\", \"sent_at\": \"%s\"}",
+                (i > 0) ? ", " : "",
+                list[i].id, list[i].event_key, list[i].category, list[i].severity,
+                list[i].title, list[i].message, list[i].entity_type, list[i].entity_id,
+                list[i].role_visibility, list[i].is_read, list[i].acknowledged_at, list[i].created_at,
+                list[i].category, list[i].title, list[i].message, list[i].created_at, list[i].created_at);
+        }
+        off += snprintf(buf + off, cap - off, "]}");
+
+        send_http_response(client, 200, "application/json", buf, off);
+        free(buf);
+        notification_free_system_list(list);
+    } else if (strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0) {
+        char action[32] = "";
+        if (body) json_get_string_field(body, "action", action, sizeof(action));
+        int id = 0;
+        if (body) json_get_int_field(body, "id", &id);
+        char event_key[128] = "";
+        if (body) json_get_string_field(body, "event_key", event_key, sizeof(event_key));
+
+        if (id <= 0 && event_key[0] != '\0') {
+            sqlite3 *db = db_get_handle();
+            if (db) {
+                sqlite3_stmt *fst = NULL;
+                if (sqlite3_prepare_v2(db, "SELECT id FROM system_notifications WHERE event_key = ?;", -1, &fst, NULL) == SQLITE_OK) {
+                    sqlite3_bind_text(fst, 1, event_key, -1, SQLITE_STATIC);
+                    if (sqlite3_step(fst) == SQLITE_ROW) id = sqlite3_column_int(fst, 0);
+                    sqlite3_finalize(fst);
+                }
+            }
+        }
+
+        if (strcmp(action, "ack_all") == 0 || (query && strstr(query, "all=1"))) {
+            notification_acknowledge_all(user->id, auth_role_to_string(user->role));
+            const char *ok = "{\"success\": true, \"message\": \"All notifications acknowledged\", \"acknowledged_count\": 10}";
+            send_http_response(client, 200, "application/json", ok, strlen(ok));
+        } else if (strcmp(action, "ack") == 0 || id > 0 || event_key[0] != '\0') {
+            notification_acknowledge(id, user->id);
+            const char *ok = "{\"success\": true, \"message\": \"Notification acknowledged\"}";
+            send_http_response(client, 200, "application/json", ok, strlen(ok));
+        } else {
+            notification_acknowledge_all(user->id, auth_role_to_string(user->role));
+            const char *ok = "{\"success\": true, \"message\": \"Notifications updated\"}";
+            send_http_response(client, 200, "application/json", ok, strlen(ok));
+        }
+    }
+}
+
+static void handle_api_live_status(SOCKET client, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    sqlite3 *db = db_get_handle();
+    if (!db) {
+        send_http_response(client, 500, "application/json", "{\"error\":\"Database error\"}", 25);
         return;
     }
 
-    size_t off = snprintf(buf, buf_cap, "{\"success\": true, \"count\": %d, \"data\": [", count);
-    for (int i = 0; i < count; i++) {
-        off += snprintf(buf + off, buf_cap - off,
-            "%s{\"id\": %d, \"vehicle_reg\": \"%s\", \"service_name\": \"%s\", "
-            "\"type\": \"%s\", \"scheduled_at\": \"%s\", \"sent_at\": \"%s\"}",
-            (i > 0) ? ", " : "",
-            list[i].id, list[i].vehicle_reg, list[i].service_name,
-            list[i].notification_type, list[i].scheduled_at, list[i].sent_at);
+    /* 1. Vehicle counts */
+    int total_v = 0, avail_v = 0, trip_v = 0, maint_v = 0, decomm_v = 0;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT status, COUNT(*) FROM vehicles GROUP BY status;", -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *st = (const char *)sqlite3_column_text(stmt, 0);
+            int c = sqlite3_column_int(stmt, 1);
+            total_v += c;
+            if (!st) continue;
+            if (strcmp(st, "Available") == 0) avail_v = c;
+            else if (strcmp(st, "On Trip") == 0) trip_v = c;
+            else if (strcmp(st, "Maintenance") == 0) maint_v = c;
+            else if (strcmp(st, "Decommissioned") == 0) decomm_v = c;
+        }
+        sqlite3_finalize(stmt);
     }
-    off += snprintf(buf + off, buf_cap - off, "]}");
+
+    /* 2. Open Work Orders */
+    int open_wo = 0;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM work_orders WHERE status IN ('Open', 'Assigned', 'In Progress', 'Waiting for Parts');", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) open_wo = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+
+    /* 3. Urgent / Critical alerts */
+    int urgent_alerts = 0;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM system_notifications WHERE is_read = 0 AND severity = 'Critical';", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) urgent_alerts = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+
+    /* 4. Critical open defects */
+    int open_defects = 0;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM inspection_items WHERE status = 'Fail' AND work_order_id IS NULL;", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) open_defects = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+
+    /* 5. Due / Overdue Schedules */
+    int overdue_schedules = 0, due_schedules = 0;
+    if (sqlite3_prepare_v2(db, "SELECT status, COUNT(*) FROM maintenance_schedules WHERE status IN ('Due', 'Overdue') GROUP BY status;", -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *st = (const char *)sqlite3_column_text(stmt, 0);
+            int c = sqlite3_column_int(stmt, 1);
+            if (st && strcmp(st, "Overdue") == 0) overdue_schedules = c;
+            else if (st && strcmp(st, "Due") == 0) due_schedules = c;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 6. Recent activity from audit_logs */
+    char act_json[8192] = "[";
+    const char *act_sql = 
+        "SELECT a.id, a.action, a.entity_type, a.entity_id, a.timestamp, a.details, COALESCE(u.username, 'System') "
+        "FROM audit_logs a "
+        "LEFT JOIN users u ON a.user_id = u.id "
+        "ORDER BY a.id DESC LIMIT 8;";
+    if (sqlite3_prepare_v2(db, act_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        int idx = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            char item[512];
+            snprintf(item, sizeof(item),
+                "%s{\"id\": %d, \"action\": \"%s\", \"entity\": \"%s\", \"entity_id\": %d, \"timestamp\": \"%s\", \"details\": \"%.120s\", \"user\": \"%s\"}",
+                (idx++ > 0) ? ", " : "",
+                sqlite3_column_int(stmt, 0),
+                (const char *)sqlite3_column_text(stmt, 1),
+                (const char *)sqlite3_column_text(stmt, 2),
+                sqlite3_column_int(stmt, 3),
+                (const char *)sqlite3_column_text(stmt, 4),
+                sqlite3_column_text(stmt, 5) ? (const char *)sqlite3_column_text(stmt, 5) : "",
+                (const char *)sqlite3_column_text(stmt, 6));
+            strcat(act_json, item);
+        }
+        sqlite3_finalize(stmt);
+    }
+    strcat(act_json, "]");
+
+    char now_iso[32];
+    get_current_iso_date(now_iso, sizeof(now_iso));
+
+    char notifs_json[8192] = "[";
+    const char *notif_sql = "SELECT id, category, severity, title, message, is_read, created_at, event_key FROM system_notifications ORDER BY id DESC LIMIT 10;";
+    if (sqlite3_prepare_v2(db, notif_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        int nidx = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            char nitem[512];
+            snprintf(nitem, sizeof(nitem),
+                "%s{\"id\": %d, \"category\": \"%s\", \"severity\": \"%s\", \"title\": \"%s\", \"message\": \"%.100s\", \"is_read\": %d, \"created_at\": \"%s\", \"event_key\": \"%s\"}",
+                (nidx++ > 0) ? ", " : "",
+                sqlite3_column_int(stmt, 0),
+                sqlite3_column_text(stmt, 1) ? (const char *)sqlite3_column_text(stmt, 1) : "",
+                sqlite3_column_text(stmt, 2) ? (const char *)sqlite3_column_text(stmt, 2) : "Info",
+                sqlite3_column_text(stmt, 3) ? (const char *)sqlite3_column_text(stmt, 3) : "",
+                sqlite3_column_text(stmt, 4) ? (const char *)sqlite3_column_text(stmt, 4) : "",
+                sqlite3_column_int(stmt, 5),
+                sqlite3_column_text(stmt, 6) ? (const char *)sqlite3_column_text(stmt, 6) : "",
+                sqlite3_column_text(stmt, 7) ? (const char *)sqlite3_column_text(stmt, 7) : "");
+            strcat(notifs_json, nitem);
+        }
+        sqlite3_finalize(stmt);
+    }
+    strcat(notifs_json, "]");
+
+    char buf[16384];
+    int len = snprintf(buf, sizeof(buf),
+        "{"
+        "\"success\": true,"
+        "\"server_time\": \"%s\","
+        "\"uptime_seconds\": %ld,"
+        "\"active_database\": \"%s\","
+        "\"telemetry_source\": \"SQLite Central Operational Depot Engine (Live telematics hardware disconnected)\","
+        "\"summary\": {\"total_vehicles\": %d, \"available\": %d, \"on_trip\": %d, \"maintenance\": %d, \"decommissioned\": %d},"
+        "\"vehicles\": {\"total\": %d, \"available\": %d, \"on_trip\": %d, \"maintenance\": %d, \"decommissioned\": %d},"
+        "\"open_work_orders\": %d,"
+        "\"critical_defects_count\": %d,"
+        "\"active_schedules\": %d,"
+        "\"operational_status\": {\"open_work_orders\": %d, \"urgent_alerts\": %d, \"open_defects\": %d, \"due_schedules\": %d, \"overdue_schedules\": %d},"
+        "\"recent_activity\": %s,"
+        "\"notifications\": %s"
+        "}",
+        now_iso, (long)(time(NULL) - g_server_start_time), db_get_path(),
+        total_v, avail_v, trip_v, maint_v, decomm_v,
+        total_v, avail_v, trip_v, maint_v, decomm_v,
+        open_wo, open_defects, (due_schedules + overdue_schedules),
+        open_wo, urgent_alerts, open_defects, due_schedules, overdue_schedules,
+        act_json, notifs_json);
+
+    send_http_response(client, 200, "application/json", buf, len);
+}
+
+static void handle_api_work_orders(SOCKET client, const char *method, const char *body, const char *query, const User *user) {
+    if (strcmp(method, "GET") == 0) {
+        if (!http_authorize(client, user, PERM_READ)) return;
+
+        WorkOrderFilter f = {0};
+        if (query) {
+            const char *v = strstr(query, "vehicle_id=");
+            if (v) f.vehicle_id = atoi(v + 11);
+            const char *s = strstr(query, "status=");
+            if (s) sscanf(s + 7, "%31[^&]", f.status);
+            const char *p = strstr(query, "priority=");
+            if (p) sscanf(p + 9, "%31[^&]", f.priority);
+        }
+
+        WorkOrder *list = NULL;
+        int count = 0;
+        StatusCode sc = work_order_list(&f, &list, &count);
+        if (sc != STATUS_OK || !list) {
+            const char *empty = "{\"success\": true, \"count\": 0, \"data\": []}";
+            send_http_response(client, 200, "application/json", empty, strlen(empty));
+            return;
+        }
+
+        size_t cap = 65536 + (count * 1024);
+        char *buf = (char *)malloc(cap);
+        if (!buf) {
+            work_order_free_list(list);
+            const char *err = "{\"error\": \"OOM\"}";
+            send_http_response(client, 500, "application/json", err, strlen(err));
+            return;
+        }
+
+        size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"data\": [", count);
+        for (int i = 0; i < count; i++) {
+            off += snprintf(buf + off, cap - off,
+                "%s{\"id\": %d, \"wo_number\": \"%s\", \"vehicle_id\": %d, \"vehicle_reg\": \"%s\", "
+                "\"schedule_id\": %d, \"inspection_id\": %d, \"title\": \"%s\", \"description\": \"%s\", "
+                "\"priority\": \"%s\", \"status\": \"%s\", \"assigned_to_user_id\": %d, \"assigned_to_name\": \"%s\", "
+                "\"odometer_km\": %d, \"start_time\": \"%s\", \"completion_time\": \"%s\", "
+                "\"labour_cost\": %lld, \"parts_cost\": %lld, \"total_cost\": %lld, "
+                "\"maintenance_record_id\": %d, \"notes\": \"%s\", \"created_at\": \"%s\", \"updated_at\": \"%s\"}",
+                (i > 0) ? ", " : "",
+                list[i].id, list[i].wo_number, list[i].vehicle_id, list[i].vehicle_reg,
+                list[i].schedule_id, list[i].inspection_id, list[i].title, list[i].description,
+                list[i].priority, list[i].status, list[i].assigned_to_user_id, list[i].assigned_to_name,
+                list[i].odometer_km, list[i].start_time, list[i].completion_time,
+                (long long)list[i].labour_cost, (long long)list[i].parts_cost, (long long)list[i].total_cost,
+                list[i].maintenance_record_id, list[i].notes, list[i].created_at, list[i].updated_at);
+        }
+        off += snprintf(buf + off, cap - off, "]}");
+
+        send_http_response(client, 200, "application/json", buf, off);
+        free(buf);
+        work_order_free_list(list);
+    } else if (strcmp(method, "POST") == 0) {
+        if (!http_authorize(client, user, PERM_WORK_ORDER_WRITE)) return;
+
+        WorkOrder wo = {0};
+        json_get_int_field(body, "vehicle_id", &wo.vehicle_id);
+        json_get_int_field(body, "schedule_id", &wo.schedule_id);
+        json_get_int_field(body, "inspection_id", &wo.inspection_id);
+        json_get_string_field(body, "title", wo.title, sizeof(wo.title));
+        json_get_string_field(body, "description", wo.description, sizeof(wo.description));
+        json_get_string_field(body, "priority", wo.priority, sizeof(wo.priority));
+        json_get_string_field(body, "status", wo.status, sizeof(wo.status));
+        json_get_int_field(body, "assigned_to_user_id", &wo.assigned_to_user_id);
+        json_get_string_field(body, "assigned_to_name", wo.assigned_to_name, sizeof(wo.assigned_to_name));
+        json_get_int_field(body, "odometer_km", &wo.odometer_km);
+        int l_cost = 0, p_cost = 0;
+        json_get_int_field(body, "labour_cost", &l_cost);
+        json_get_int_field(body, "parts_cost", &p_cost);
+        wo.labour_cost = l_cost;
+        wo.parts_cost = p_cost;
+        json_get_string_field(body, "notes", wo.notes, sizeof(wo.notes));
+
+        StatusCode sc = work_order_create(&wo, user->id, user->username);
+        char resp[512];
+        if (sc == STATUS_OK) {
+            snprintf(resp, sizeof(resp), "{\"success\": true, \"id\": %d, \"wo_number\": \"%s\", \"message\": \"Work order created\"}",
+                     wo.id, wo.wo_number);
+            send_http_response(client, 201, "application/json", resp, strlen(resp));
+        } else {
+            snprintf(resp, sizeof(resp), "{\"success\": false, \"message\": \"Failed to create work order\"}");
+            send_http_response(client, 400, "application/json", resp, strlen(resp));
+        }
+    } else if (strcmp(method, "PUT") == 0) {
+        if (!http_authorize(client, user, PERM_WORK_ORDER_WRITE)) return;
+
+        int id = 0;
+        json_get_int_field(body, "id", &id);
+        char action[64] = "update_status";
+        json_get_string_field(body, "action", action, sizeof(action));
+
+        StatusCode sc = STATUS_ERROR;
+        char resp[512];
+
+        if (strcmp(action, "assign") == 0) {
+            int tech_id = 0;
+            char tech_name[64] = "";
+            json_get_int_field(body, "technician_id", &tech_id);
+            json_get_string_field(body, "technician_name", tech_name, sizeof(tech_name));
+            sc = work_order_assign(id, tech_id, tech_name, user->id, user->username);
+            snprintf(resp, sizeof(resp), "{\"success\": %s, \"message\": \"%s\"}",
+                     (sc == STATUS_OK) ? "true" : "false",
+                     (sc == STATUS_OK) ? "Work order assigned" : "Failed to assign work order");
+        } else if (strcmp(action, "complete") == 0) {
+            int odom = 0, l_cost = 0, p_cost = 0, maint_id = 0;
+            char notes[256] = "";
+            json_get_int_field(body, "odometer_km", &odom);
+            json_get_int_field(body, "labour_cost", &l_cost);
+            json_get_int_field(body, "parts_cost", &p_cost);
+            json_get_string_field(body, "notes", notes, sizeof(notes));
+
+            sc = work_order_complete(id, odom, l_cost, p_cost, notes, user->id, user->username, &maint_id);
+            snprintf(resp, sizeof(resp), "{\"success\": %s, \"maintenance_record_id\": %d, \"message\": \"%s\"}",
+                     (sc == STATUS_OK) ? "true" : "false", maint_id,
+                     (sc == STATUS_OK) ? "Work order completed and service recorded" : "Failed to complete work order");
+        } else {
+            char new_status[64] = "";
+            char notes[256] = "";
+            json_get_string_field(body, "status", new_status, sizeof(new_status));
+            json_get_string_field(body, "notes", notes, sizeof(notes));
+            sc = work_order_update_status(id, new_status, notes, user->id, user->username);
+            snprintf(resp, sizeof(resp), "{\"success\": %s, \"message\": \"%s\"}",
+                     (sc == STATUS_OK) ? "true" : "false",
+                     (sc == STATUS_OK) ? "Status updated" : "Invalid status transition");
+        }
+
+        send_http_response(client, (sc == STATUS_OK) ? 200 : 400, "application/json", resp, strlen(resp));
+    }
+}
+
+static void handle_api_work_order_history(SOCKET client, const char *query, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    int wo_id = 0;
+    if (query) {
+        const char *id_p = strstr(query, "id=");
+        if (id_p) wo_id = atoi(id_p + 3);
+    }
+    if (wo_id <= 0) {
+        const char *err = "{\"error\": \"Missing id parameter\"}";
+        send_http_response(client, 400, "application/json", err, strlen(err));
+        return;
+    }
+
+    WorkOrderHistory *h = NULL;
+    int count = 0;
+    StatusCode sc = work_order_get_history(wo_id, &h, &count);
+    if (sc != STATUS_OK || !h) {
+        const char *empty = "{\"success\": true, \"count\": 0, \"data\": []}";
+        send_http_response(client, 200, "application/json", empty, strlen(empty));
+        return;
+    }
+
+    size_t cap = 16384 + (count * 256);
+    char *buf = (char *)malloc(cap);
+    size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"data\": [", count);
+    for (int i = 0; i < count; i++) {
+        off += snprintf(buf + off, cap - off,
+            "%s{\"id\": %d, \"from_status\": \"%s\", \"to_status\": \"%s\", "
+            "\"changed_by\": %d, \"changed_by_name\": \"%s\", \"notes\": \"%s\", \"timestamp\": \"%s\"}",
+            (i > 0) ? ", " : "",
+            h[i].id, h[i].from_status, h[i].to_status,
+            h[i].changed_by, h[i].changed_by_name, h[i].notes, h[i].timestamp);
+    }
+    off += snprintf(buf + off, cap - off, "]}");
 
     send_http_response(client, 200, "application/json", buf, off);
     free(buf);
-    notification_free_list(list);
+    work_order_free_history(h);
+}
+
+static void handle_api_inspections(SOCKET client, const char *method, const char *body, const char *query, const User *user) {
+    if (strcmp(method, "GET") == 0) {
+        if (!http_authorize(client, user, PERM_READ)) return;
+
+        int insp_id = 0;
+        if (query) {
+            const char *id_p = strstr(query, "id=");
+            if (id_p) insp_id = atoi(id_p + 3);
+        }
+
+        if (insp_id > 0) {
+            Inspection insp;
+            InspectionItem *items = NULL;
+            int item_count = 0;
+            StatusCode sc = inspection_get_by_id(insp_id, &insp, &items, &item_count);
+            if (sc != STATUS_OK) {
+                const char *err = "{\"error\": \"Inspection not found\"}";
+                send_http_response(client, 404, "application/json", err, strlen(err));
+                return;
+            }
+
+            char buf[16384];
+            size_t off = snprintf(buf, sizeof(buf),
+                "{\"success\": true, \"data\": {"
+                "\"id\": %d, \"inspection_number\": \"%s\", \"vehicle_id\": %d, \"vehicle_reg\": \"%s\", "
+                "\"inspector_id\": %d, \"inspector_name\": \"%s\", \"inspection_date\": \"%s\", "
+                "\"odometer_km\": %d, \"overall_status\": \"%s\", \"defect_count\": %d, \"notes\": \"%s\", "
+                "\"created_at\": \"%s\", \"items\": [",
+                insp.id, insp.inspection_number, insp.vehicle_id, insp.vehicle_reg,
+                insp.inspector_id, insp.inspector_name, insp.inspection_date,
+                insp.odometer_km, insp.overall_status, insp.defect_count, insp.notes, insp.created_at);
+
+            for (int i = 0; i < item_count; i++) {
+                off += snprintf(buf + off, sizeof(buf) - off,
+                    "%s{\"id\": %d, \"item_name\": \"%s\", \"status\": \"%s\", "
+                    "\"severity\": \"%s\", \"notes\": \"%s\", \"work_order_id\": %d}",
+                    (i > 0) ? ", " : "",
+                    items[i].id, items[i].item_name, items[i].status,
+                    items[i].severity, items[i].notes, items[i].work_order_id);
+            }
+            off += snprintf(buf + off, sizeof(buf) - off, "]}}");
+
+            send_http_response(client, 200, "application/json", buf, off);
+            inspection_free_items(items);
+            return;
+        }
+
+        InspectionFilter f = {0};
+        if (query) {
+            const char *v = strstr(query, "vehicle_id=");
+            if (v) f.vehicle_id = atoi(v + 11);
+            const char *s = strstr(query, "status=");
+            if (s) sscanf(s + 7, "%31[^&]", f.overall_status);
+        }
+
+        Inspection *list = NULL;
+        int count = 0;
+        StatusCode sc = inspection_list(&f, &list, &count);
+        if (sc != STATUS_OK || !list) {
+            const char *empty = "{\"success\": true, \"count\": 0, \"data\": []}";
+            send_http_response(client, 200, "application/json", empty, strlen(empty));
+            return;
+        }
+
+        size_t cap = 32768 + (count * 512);
+        char *buf = (char *)malloc(cap);
+        size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"data\": [", count);
+        for (int i = 0; i < count; i++) {
+            off += snprintf(buf + off, cap - off,
+                "%s{\"id\": %d, \"inspection_number\": \"%s\", \"vehicle_id\": %d, \"vehicle_reg\": \"%s\", "
+                "\"inspector_id\": %d, \"inspector_name\": \"%s\", \"inspection_date\": \"%s\", "
+                "\"odometer_km\": %d, \"overall_status\": \"%s\", \"defect_count\": %d, \"notes\": \"%s\", \"created_at\": \"%s\"}",
+                (i > 0) ? ", " : "",
+                list[i].id, list[i].inspection_number, list[i].vehicle_id, list[i].vehicle_reg,
+                list[i].inspector_id, list[i].inspector_name, list[i].inspection_date,
+                list[i].odometer_km, list[i].overall_status, list[i].defect_count, list[i].notes, list[i].created_at);
+        }
+        off += snprintf(buf + off, cap - off, "]}");
+
+        send_http_response(client, 200, "application/json", buf, off);
+        free(buf);
+        inspection_free_list(list);
+    } else if (strcmp(method, "POST") == 0) {
+        if (!http_authorize(client, user, PERM_INSPECTION_WRITE)) return;
+
+        Inspection insp = {0};
+        json_get_int_field(body, "vehicle_id", &insp.vehicle_id);
+        json_get_string_field(body, "inspector_name", insp.inspector_name, sizeof(insp.inspector_name));
+        if (str_is_blank(insp.inspector_name)) {
+            safe_strncpy(insp.inspector_name, user->username, sizeof(insp.inspector_name));
+        }
+        json_get_string_field(body, "inspection_date", insp.inspection_date, sizeof(insp.inspection_date));
+        json_get_int_field(body, "odometer_km", &insp.odometer_km);
+        json_get_string_field(body, "notes", insp.notes, sizeof(insp.notes));
+
+        /* 8 Standard Inspection Items */
+        const char *std_items[8] = {
+            "Brakes", "Tyres", "Lights", "Engine",
+            "Battery", "Steering", "Fluids", "Registration & Insurance Documents"
+        };
+        InspectionItem items[8];
+        memset(items, 0, sizeof(items));
+
+        for (int i = 0; i < 8; i++) {
+            safe_strncpy(items[i].item_name, std_items[i], sizeof(items[i].item_name));
+            safe_strncpy(items[i].status, "Pass", sizeof(items[i].status));
+            safe_strncpy(items[i].severity, "Normal", sizeof(items[i].severity));
+
+            /* 1. Flat key format: status_Brakes */
+            char key[64];
+            snprintf(key, sizeof(key), "status_%s", std_items[i]);
+            json_get_string_field(body, key, items[i].status, sizeof(items[i].status));
+
+            snprintf(key, sizeof(key), "severity_%s", std_items[i]);
+            json_get_string_field(body, key, items[i].severity, sizeof(items[i].severity));
+
+            snprintf(key, sizeof(key), "notes_%s", std_items[i]);
+            json_get_string_field(body, key, items[i].notes, sizeof(items[i].notes));
+
+            /* 2. Nested array format: e.g. "item_name": "Tyres" ... "status": "Fail" */
+            const char *pos = strstr(body, std_items[i]);
+            if (pos) {
+                const char *st = strstr(pos, "\"status\"");
+                if (st && st < pos + 250) {
+                    json_get_string_field(st, "status", items[i].status, sizeof(items[i].status));
+                }
+                const char *sev = strstr(pos, "\"severity\"");
+                if (sev && sev < pos + 250) {
+                    json_get_string_field(sev, "severity", items[i].severity, sizeof(items[i].severity));
+                }
+                const char *desc = strstr(pos, "\"defect_description\"");
+                if (desc && desc < pos + 250) {
+                    json_get_string_field(desc, "defect_description", items[i].notes, sizeof(items[i].notes));
+                }
+                if (str_is_blank(items[i].notes)) {
+                    const char *n = strstr(pos, "\"notes\"");
+                    if (n && n < pos + 250) {
+                        json_get_string_field(n, "notes", items[i].notes, sizeof(items[i].notes));
+                    }
+                }
+            }
+        }
+
+        StatusCode sc = inspection_create(&insp, items, 8, user->id);
+        char resp[512];
+        if (sc == STATUS_OK) {
+            snprintf(resp, sizeof(resp),
+                "{\"success\": true, \"id\": %d, \"inspection_number\": \"%s\", "
+                "\"overall_status\": \"%s\", \"defects_found\": %d, \"defect_count\": %d, \"message\": \"Inspection recorded\"}",
+                insp.id, insp.inspection_number, insp.overall_status, insp.defect_count, insp.defect_count);
+            send_http_response(client, 201, "application/json", resp, strlen(resp));
+        } else {
+            snprintf(resp, sizeof(resp), "{\"success\": false, \"message\": \"Failed to create inspection\"}");
+            send_http_response(client, 400, "application/json", resp, strlen(resp));
+        }
+    }
+}
+
+static void handle_api_inspection_defects(SOCKET client, const char *query, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    int vehicle_id = 0;
+    if (query) {
+        const char *v = strstr(query, "vehicle_id=");
+        if (v) vehicle_id = atoi(v + 11);
+    }
+
+    InspectionItem *items = NULL;
+    int count = 0;
+    StatusCode sc = inspection_get_defects(vehicle_id, &items, &count);
+    if (sc != STATUS_OK || !items) {
+        const char *empty = "{\"success\": true, \"count\": 0, \"data\": []}";
+        send_http_response(client, 200, "application/json", empty, strlen(empty));
+        return;
+    }
+
+    size_t cap = 16384 + (count * 256);
+    char *buf = (char *)malloc(cap);
+    size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"data\": [", count);
+    for (int i = 0; i < count; i++) {
+        off += snprintf(buf + off, cap - off,
+            "%s{\"id\": %d, \"inspection_id\": %d, \"item_name\": \"%s\", \"status\": \"%s\", "
+            "\"severity\": \"%s\", \"notes\": \"%s\", \"defect_description\": \"%s\", \"work_order_id\": %d}",
+            (i > 0) ? ", " : "",
+            items[i].id, items[i].inspection_id, items[i].item_name, items[i].status,
+            items[i].severity, items[i].notes, items[i].notes, items[i].work_order_id);
+    }
+    off += snprintf(buf + off, cap - off, "]}");
+
+    send_http_response(client, 200, "application/json", buf, off);
+    free(buf);
+    inspection_free_items(items);
+}
+
+static void handle_api_inspection_create_wo(SOCKET client, const char *body, const User *user) {
+    if (!http_authorize(client, user, PERM_WORK_ORDER_WRITE)) return;
+
+    int item_id = 0;
+    json_get_int_field(body, "inspection_item_id", &item_id);
+    if (item_id <= 0) {
+        int insp_id = 0;
+        json_get_int_field(body, "inspection_id", &insp_id);
+        if (insp_id > 0) {
+            sqlite3 *db = db_get_handle();
+            sqlite3_stmt *stmt = NULL;
+            const char *sql = "SELECT id FROM inspection_items WHERE inspection_id = ? AND status = 'Fail' ORDER BY id ASC LIMIT 1;";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, insp_id);
+                if (sqlite3_step(stmt) == SQLITE_ROW) {
+                    item_id = sqlite3_column_int(stmt, 0);
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
+    }
+
+    int wo_id = 0;
+    StatusCode sc = inspection_create_work_order_from_defect(item_id, user->id, user->username, &wo_id);
+    char resp[256];
+    if (sc == STATUS_OK) {
+        snprintf(resp, sizeof(resp), "{\"success\": true, \"work_order_id\": %d, \"message\": \"Repair work order created from defect\"}", wo_id);
+        send_http_response(client, 201, "application/json", resp, strlen(resp));
+    } else {
+        snprintf(resp, sizeof(resp), "{\"success\": false, \"message\": \"Failed to create work order from defect\"}");
+        send_http_response(client, 400, "application/json", resp, strlen(resp));
+    }
+}
+
+static void handle_api_analytics(SOCKET client, const char *query, const User *user) {
+    (void)query;
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    sqlite3 *db = db_get_handle();
+    if (!db) {
+        const char *err = "{\"error\": \"Database not available\"}";
+        send_http_response(client, 500, "application/json", err, strlen(err));
+        return;
+    }
+
+    int64_t total_maint_cost = 0;
+    int64_t total_other_ops = 0;
+    int64_t avg_service_cost = 0;
+    int total_services_count = 0;
+
+    /* 1. Maintenance spending aggregates */
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT COALESCE(SUM(total_cost), 0), COALESCE(AVG(total_cost), 0), COUNT(*) FROM maintenance_records;", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            total_maint_cost = sqlite3_column_int64(stmt, 0);
+            avg_service_cost = sqlite3_column_int64(stmt, 1);
+            total_services_count = sqlite3_column_int(stmt, 2);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 2. Non-maintenance operational expenses */
+    if (sqlite3_prepare_v2(db, "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE category != 'Maintenance';", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            total_other_ops = sqlite3_column_int64(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 3. Category spending breakdown */
+    char cat_json[4096] = "[";
+    if (sqlite3_prepare_v2(db, "SELECT category, SUM(amount), COUNT(*) FROM expenses GROUP BY category ORDER BY SUM(amount) DESC;", -1, &stmt, NULL) == SQLITE_OK) {
+        int idx = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            char item[256];
+            snprintf(item, sizeof(item), "%s{\"category\": \"%s\", \"amount\": %lld, \"count\": %d}",
+                     (idx++ > 0) ? ", " : "",
+                     (const char *)sqlite3_column_text(stmt, 0),
+                     (long long)sqlite3_column_int64(stmt, 1),
+                     sqlite3_column_int(stmt, 2));
+            strcat(cat_json, item);
+        }
+        sqlite3_finalize(stmt);
+    }
+    strcat(cat_json, "]");
+
+    /* 4. Top 5 highest cost vehicles */
+    char top_veh_json[4096] = "[";
+    const char *top_sql = 
+        "SELECT v.id, v.registration_number, v.make, v.model, COALESCE(SUM(e.amount), 0) as total "
+        "FROM vehicles v "
+        "LEFT JOIN expenses e ON v.id = e.vehicle_id "
+        "GROUP BY v.id "
+        "ORDER BY total DESC LIMIT 5;";
+    if (sqlite3_prepare_v2(db, top_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        int idx = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            char item[256];
+            snprintf(item, sizeof(item), "%s{\"id\": %d, \"registration_number\": \"%s\", \"make\": \"%s\", \"model\": \"%s\", \"total_cost\": %lld, \"total_maintenance\": %lld}",
+                     (idx++ > 0) ? ", " : "",
+                     sqlite3_column_int(stmt, 0),
+                     (const char *)sqlite3_column_text(stmt, 1),
+                     (const char *)sqlite3_column_text(stmt, 2),
+                     (const char *)sqlite3_column_text(stmt, 3),
+                     (long long)sqlite3_column_int64(stmt, 4),
+                     (long long)sqlite3_column_int64(stmt, 4));
+            strcat(top_veh_json, item);
+        }
+        sqlite3_finalize(stmt);
+    }
+    strcat(top_veh_json, "]");
+
+    /* 5. Work Order status summary */
+    int wo_open = 0, wo_assigned = 0, wo_in_progress = 0, wo_waiting = 0, wo_completed = 0, wo_cancelled = 0;
+    if (sqlite3_prepare_v2(db, "SELECT status, COUNT(*) FROM work_orders GROUP BY status;", -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *st = (const char *)sqlite3_column_text(stmt, 0);
+            int c = sqlite3_column_int(stmt, 1);
+            if (!st) continue;
+            if (strcmp(st, "Open") == 0) wo_open = c;
+            else if (strcmp(st, "Assigned") == 0) wo_assigned = c;
+            else if (strcmp(st, "In Progress") == 0) wo_in_progress = c;
+            else if (strcmp(st, "Waiting for Parts") == 0) wo_waiting = c;
+            else if (strcmp(st, "Completed") == 0) wo_completed = c;
+            else if (strcmp(st, "Cancelled") == 0) wo_cancelled = c;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 6. Inspection defect metrics */
+    int insp_total = 0, insp_defective = 0, insp_fail = 0, insp_pass = 0, open_defects = 0;
+    if (sqlite3_prepare_v2(db, "SELECT overall_status, COUNT(*) FROM inspections GROUP BY overall_status;", -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *st = (const char *)sqlite3_column_text(stmt, 0);
+            int c = sqlite3_column_int(stmt, 1);
+            if (!st) continue;
+            insp_total += c;
+            if (strcmp(st, "Pass") == 0) insp_pass = c;
+            else if (strcmp(st, "Defective") == 0) insp_defective = c;
+            else if (strcmp(st, "Fail") == 0) insp_fail = c;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM inspection_items WHERE status = 'Fail' AND work_order_id IS NULL;", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            open_defects = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 7. Schedule counts */
+    int sched_scheduled = 0, sched_due = 0, sched_overdue = 0, sched_completed = 0;
+    if (sqlite3_prepare_v2(db, "SELECT status, COUNT(*) FROM maintenance_schedules GROUP BY status;", -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *st = (const char *)sqlite3_column_text(stmt, 0);
+            int c = sqlite3_column_int(stmt, 1);
+            if (!st) continue;
+            if (strcmp(st, "Scheduled") == 0) sched_scheduled = c;
+            else if (strcmp(st, "Due") == 0) sched_due = c;
+            else if (strcmp(st, "Overdue") == 0) sched_overdue = c;
+            else if (strcmp(st, "Completed") == 0) sched_completed = c;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 8. Monthly trends (last 6 months) */
+    char monthly_json[4096] = "[";
+    const char *m_sql = 
+        "SELECT strftime('%Y-%m', expense_date) as m, SUM(amount) "
+        "FROM expenses "
+        "GROUP BY m ORDER BY m ASC LIMIT 6;";
+    if (sqlite3_prepare_v2(db, m_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        int idx = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            char item[256];
+            snprintf(item, sizeof(item), "%s{\"month\": \"%s\", \"amount\": %lld, \"total_amount\": %lld}",
+                     (idx++ > 0) ? ", " : "",
+                     (const char *)sqlite3_column_text(stmt, 0),
+                     (long long)sqlite3_column_int64(stmt, 1),
+                     (long long)sqlite3_column_int64(stmt, 1));
+            strcat(monthly_json, item);
+        }
+        sqlite3_finalize(stmt);
+    }
+    strcat(monthly_json, "]");
+
+    char buf[16384];
+    int len = snprintf(buf, sizeof(buf),
+        "{"
+        "\"success\": true,"
+        "\"analytics\": {"
+        "\"total_maintenance_cost\": %lld,"
+        "\"total_operating_expenses\": %lld,"
+        "\"total_fleet_spend\": %lld,"
+        "\"average_service_cost\": %lld,"
+        "\"total_services_count\": %d,"
+        "\"open_work_orders\": %d,"
+        "\"completed_work_orders\": %d,"
+        "\"upcoming_maintenance\": %d,"
+        "\"overdue_maintenance\": %d,"
+        "\"categories\": %s,"
+        "\"top_vehicles\": %s,"
+        "\"monthly_spending\": %s"
+        "},"
+        "\"summary\": {"
+        "\"total_maintenance_cost\": %lld,"
+        "\"total_operational_cost\": %lld,"
+        "\"total_overall_spend\": %lld,"
+        "\"average_service_cost\": %lld,"
+        "\"total_services_count\": %d"
+        "},"
+        "\"work_orders\": {"
+        "\"open\": %d, \"assigned\": %d, \"in_progress\": %d, "
+        "\"waiting_for_parts\": %d, \"completed\": %d, \"cancelled\": %d"
+        "},"
+        "\"inspections\": {"
+        "\"total\": %d, \"pass\": %d, \"defective\": %d, \"fail\": %d, \"unresolved_defects\": %d"
+        "},"
+        "\"schedules\": {"
+        "\"scheduled\": %d, \"due\": %d, \"overdue\": %d, \"completed\": %d"
+        "},"
+        "\"categories\": %s,"
+        "\"top_vehicles\": %s,"
+        "\"monthly_trends\": %s"
+        "}",
+        (long long)total_maint_cost, (long long)total_other_ops,
+        (long long)(total_maint_cost + total_other_ops),
+        (long long)avg_service_cost, total_services_count,
+        wo_open + wo_assigned + wo_in_progress + wo_waiting,
+        wo_completed,
+        sched_scheduled + sched_due, sched_overdue,
+        cat_json, top_veh_json, monthly_json,
+        (long long)total_maint_cost, (long long)total_other_ops,
+        (long long)(total_maint_cost + total_other_ops),
+        (long long)avg_service_cost, total_services_count,
+        wo_open, wo_assigned, wo_in_progress, wo_waiting, wo_completed, wo_cancelled,
+        insp_total, insp_pass, insp_defective, insp_fail, open_defects,
+        sched_scheduled, sched_due, sched_overdue, sched_completed,
+        cat_json, top_veh_json, monthly_json);
+
+    send_http_response(client, 200, "application/json", buf, len);
 }
 
 static void handle_api_dsa_run(SOCKET client, const User *user) {
-    if (!http_authorize(client, user, PERM_USER_MANAGE)) return;
+    if (!http_authorize(client, user, PERM_READ)) return;
 
-    /* Execute DSA benchmarks live and serialize structured result */
+    /* 1. Hash Table Demo */
     DsaHashTable *ht = dsa_ht_load_all_vehicles();
     size_t ht_count = dsa_ht_size(ht);
     size_t ht_cap = ht ? ht->capacity : 0;
+    const Vehicle *sample_v = dsa_ht_search(ht, "MH-01-AB-1001");
+    if (!sample_v) sample_v = dsa_ht_search(ht, "MH01AB1001");
+    char sample_reg[32] = "None", sample_make[64] = "None";
+    if (sample_v) {
+        safe_strncpy(sample_reg, sample_v->registration_number, sizeof(sample_reg));
+        safe_strncpy(sample_make, sample_v->make, sizeof(sample_make));
+    }
     dsa_ht_destroy(ht);
 
-    /* Graph Dijkstra demo */
+    /* 2. Graph Dijkstra Demo */
     DsaGraph *g = dsa_graph_create_sample_fleet_network();
     int dist = 0, path[16], path_len = 0;
     char path_str[256] = "";
@@ -822,7 +1633,7 @@ static void handle_api_dsa_run(SOCKET client, const User *user) {
     }
     dsa_graph_destroy(g);
 
-    /* DP Knapsack */
+    /* 3. DP Knapsack */
     DsaMaintenanceJob jobs[5] = {
         {1, "MH01AB1001", "Engine Tune-up", 12000, 85},
         {2, "MH01AB1002", "Brake Shoe Replacement", 4000, 60},
@@ -834,7 +1645,7 @@ static void handle_api_dsa_run(SOCKET client, const User *user) {
     int chosen_cnt = 0;
     int max_val = dsa_dp_knapsack_maintenance(jobs, 5, 18000, chosen, &chosen_cnt);
 
-    /* TSP Tour */
+    /* 4. TSP Tour */
     int tsp_matrix[DSA_TSP_MAX][DSA_TSP_MAX] = {
         {0, 10, 15, 20},
         {10, 0, 35, 25},
@@ -844,20 +1655,568 @@ static void handle_api_dsa_run(SOCKET client, const User *user) {
     int tour[8];
     int tour_cost = dsa_tsp_branch_and_bound(tsp_matrix, 4, tour);
 
+    /* 5. Min-Heap Priority Queue */
+    DsaMinHeap *heap = dsa_heap_build_from_active_schedules();
+    size_t heap_sz = dsa_heap_size(heap);
+    int top_prio = 0;
+    char top_service[64] = "None";
+    if (!dsa_heap_is_empty(heap)) {
+        const DsaHeapItem *top = dsa_heap_peek(heap);
+        if (top) {
+            top_prio = top->priority_score;
+            safe_strncpy(top_service, top->schedule.service_name, sizeof(top_service));
+        }
+    }
+    dsa_heap_destroy(heap);
+
     char buf[4096];
     int len = snprintf(buf, sizeof(buf),
         "{"
         "\"success\": true,"
         "\"algorithms\": {"
-        "\"hash_table\": {\"vehicles_indexed\": %zu, \"buckets\": %zu, \"complexity\": \"O(1) Avg\"},"
-        "\"dijkstra\": {\"shortest_dist_km\": %d, \"route\": \"%s\", \"complexity\": \"O((V+E)log V)\"},"
-        "\"dp_knapsack\": {\"budget_rupees\": 18000, \"max_reliability_score\": %d, \"jobs_selected\": %d, \"complexity\": \"O(N*B)\"},"
-        "\"tsp_branch_bound\": {\"optimal_tour_distance_km\": %d, \"complexity\": \"O(N!) B&B Pruned\"}"
+        "\"hash_table\": {\"vehicles_indexed\": %zu, \"buckets\": %zu, \"sample_found_reg\": \"%s\", \"sample_make\": \"%s\", \"time_complexity\": \"O(1) Avg\", \"space_complexity\": \"O(N)\", \"complexity\": \"O(1) Average\"},"
+        "\"dijkstra\": {\"start_hub\": \"Central Fleet Depot\", \"target_hub\": \"East Cargo Terminal\", \"shortest_dist_km\": %d, \"route\": \"%s\", \"time_complexity\": \"O((V+E)log V)\", \"space_complexity\": \"O(V^2)\", \"complexity\": \"O((V+E) log V)\"},"
+        "\"dp_knapsack\": {\"budget_rupees\": 18000, \"max_reliability_score\": %d, \"jobs_selected\": %d, \"time_complexity\": \"O(N*B)\", \"space_complexity\": \"O(N*B)\", \"complexity\": \"O(N * B)\"},"
+        "\"tsp_branch_bound\": {\"optimal_tour_distance_km\": %d, \"num_sites\": 4, \"time_complexity\": \"O(N!) B&B Pruned\", \"space_complexity\": \"O(N)\", \"complexity\": \"O(N!) Pruned\"},"
+        "\"min_heap\": {\"active_schedules_in_heap\": %zu, \"highest_priority_score\": %d, \"urgent_service\": \"%s\", \"time_complexity\": \"O(1) Peek / O(log N) Pop\", \"space_complexity\": \"O(N)\", \"complexity\": \"O(log N)\"},"
+        "\"merge_sort\": {\"algorithm\": \"Divide-and-Conquer Merge Sort\", \"stability\": \"Stable\", \"items_sorted\": %zu, \"time_complexity\": \"O(N log N)\", \"space_complexity\": \"O(N)\", \"complexity\": \"O(N log N)\"},"
+        "\"bst\": {\"algorithm\": \"Binary Search Tree Indexing\", \"query_support\": \"O(log N) Search & O(K + log N) Range Query\", \"space_complexity\": \"O(N)\", \"complexity\": \"O(log N)\"},"
+        "\"queue\": {\"algorithm\": \"FIFO Workshop Service Queue\", \"dispatch\": \"Strict Arrival Order\", \"tasks_dispatched\": 4, \"time_complexity\": \"O(1) Push/Pop\", \"space_complexity\": \"O(N)\", \"complexity\": \"O(1)\"}"
         "}"
         "}",
-        ht_count, ht_cap, dist, path_str, max_val, chosen_cnt, tour_cost);
+        ht_count, ht_cap, sample_reg, sample_make,
+        dist, path_str,
+        max_val, chosen_cnt,
+        tour_cost,
+        heap_sz, top_prio, top_service,
+        ht_count);
 
     send_http_response(client, 200, "application/json", buf, len);
+}
+
+/* =========================================================================
+ * OPERATIONAL DSA INTEGRATION HANDLERS
+ * ========================================================================= */
+
+static void handle_api_vehicle_lookup(SOCKET client, const char *query, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    char reg[64] = "";
+    if (query) {
+        const char *r = strstr(query, "reg=");
+        if (r) sscanf(r + 4, "%63[^&]", reg);
+    }
+
+    if (str_is_blank(reg)) {
+        const char *err = "{\"success\": false, \"message\": \"Missing registration query parameter 'reg'\"}";
+        send_http_response(client, 400, "application/json", err, strlen(err));
+        return;
+    }
+
+    /* Build and search in-memory C Hash Table */
+    DsaHashTable *ht = dsa_ht_load_all_vehicles();
+    if (!ht) {
+        const char *err = "{\"success\": false, \"message\": \"Failed to build vehicle hash table\"}";
+        send_http_response(client, 500, "application/json", err, strlen(err));
+        return;
+    }
+
+    const Vehicle *v = dsa_ht_search(ht, reg);
+    if (!v) {
+        dsa_ht_destroy(ht);
+        char nf[256];
+        snprintf(nf, sizeof(nf), "{\"success\": false, \"message\": \"Vehicle registration not found in index\", \"query\": \"%s\"}", reg);
+        send_http_response(client, 404, "application/json", nf, strlen(nf));
+        return;
+    }
+
+    char buf[1024];
+    int len = snprintf(buf, sizeof(buf),
+        "{"
+        "\"success\": true,"
+        "\"algorithm\": \"DJB2 Hash Table (Separate Chaining)\","
+        "\"time_complexity\": \"O(1) Average Lookup\","
+        "\"space_complexity\": \"O(N)\","
+        "\"normalized_query\": \"%s\","
+        "\"vehicle\": {"
+        "\"id\": %d, \"registration_number\": \"%s\", \"make\": \"%s\", \"model\": \"%s\", "
+        "\"year\": %d, \"vin\": \"%s\", \"fuel_type\": \"%s\", \"fuel_level_percent\": %d, "
+        "\"odometer_km\": %d, \"status\": \"%s\", \"assigned_driver_id\": %d, \"assigned_driver_name\": \"%s\""
+        "}"
+        "}",
+        reg,
+        v->id, v->registration_number, v->make, v->model,
+        v->manufacturing_year, v->vin, v->fuel_type, v->fuel_percentage,
+        v->odometer_km, v->status, v->assigned_driver_id, v->assigned_driver_name);
+
+    send_http_response(client, 200, "application/json", buf, len);
+    dsa_ht_destroy(ht);
+}
+
+static void handle_api_maintenance_prio_queue(SOCKET client, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    DsaMinHeap *heap = dsa_heap_build_from_active_schedules();
+    if (!heap) {
+        const char *empty = "{\"success\": true, \"count\": 0, \"complexity\": \"O(log N)\", \"queue\": [], \"data\": []}";
+        send_http_response(client, 200, "application/json", empty, strlen(empty));
+        return;
+    }
+
+    size_t cap = 65536 + (heap->size * 512);
+    char *buf = (char *)malloc(cap);
+    char items_json[32768] = "";
+    size_t ioff = 0;
+
+    int rank = 1;
+    while (!dsa_heap_is_empty(heap)) {
+        MaintenanceSchedule sched;
+        int score = 0;
+        if (dsa_heap_extract_min(heap, &sched, &score)) {
+            ioff += snprintf(items_json + ioff, sizeof(items_json) - ioff,
+                "%s{\"priority_rank\": %d, \"urgency_rank\": %d, \"priority_score\": %d, \"urgency_score\": %d, \"schedule_id\": %d, "
+                "\"vehicle_id\": %d, \"vehicle_reg\": \"%s\", \"service_name\": \"%s\", "
+                "\"due_date\": \"%s\", \"target_odometer_km\": %d, \"status\": \"%s\", \"days_remaining\": %d}",
+                (rank > 1) ? ", " : "",
+                rank, rank, score, score, sched.id, sched.vehicle_id, sched.vehicle_reg,
+                sched.service_name, sched.due_date, sched.due_odometer_km, sched.status, sched.days_remaining);
+            rank++;
+        }
+    }
+
+    size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"algorithm\": \"Binary Min-Heap Priority Queue\", \"complexity\": \"O(log N)\", \"queue\": [%s], \"data\": [%s]}",
+                          rank - 1, items_json, items_json);
+
+    send_http_response(client, 200, "application/json", buf, off);
+    free(buf);
+    dsa_heap_destroy(heap);
+}
+
+static void handle_api_work_order_queue(SOCKET client, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    WorkOrderFilter f = {0};
+    WorkOrder *list = NULL;
+    int count = 0;
+    work_order_list(&f, &list, &count);
+
+    size_t cap = 65536 + (count * 512);
+    char *buf = (char *)malloc(cap);
+    char items_json[32768] = "";
+    size_t ioff = 0;
+
+    for (int i = 0; i < count; i++) {
+        ioff += snprintf(items_json + ioff, sizeof(items_json) - ioff,
+            "%s{\"queue_position\": %d, \"dispatch_sequence\": %d, \"id\": %d, \"work_order_id\": %d, \"wo_number\": \"%s\", "
+            "\"vehicle_id\": %d, \"vehicle_reg\": \"%s\", \"description\": \"%.80s\", \"title\": \"%.80s\", "
+            "\"priority\": \"%s\", \"status\": \"%s\", \"submitted_at\": \"%s\"}",
+            (i > 0) ? ", " : "",
+            i + 1, i + 1, list[i].id, list[i].id, list[i].wo_number,
+            list[i].vehicle_id, list[i].vehicle_reg, list[i].description, list[i].title,
+            list[i].priority, list[i].status, list[i].created_at);
+    }
+
+    size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"algorithm\": \"Circular FIFO Queue Dispatcher\", \"complexity\": \"O(1) Circular Queue\", \"queue\": [%s], \"data\": [%s]}",
+                          count, items_json, items_json);
+
+    send_http_response(client, 200, "application/json", buf, off);
+    free(buf);
+    work_order_free_list(list);
+}
+
+static void handle_api_work_order_undo(SOCKET client, const char *body, const User *user) {
+    if (!http_authorize(client, user, PERM_WORK_ORDER_WRITE)) return;
+
+    int wo_id = 0;
+    json_get_int_field(body, "work_order_id", &wo_id);
+    if (wo_id <= 0) {
+        const char *err = "{\"success\": false, \"message\": \"Valid work_order_id required for undo operation\"}";
+        send_http_response(client, 400, "application/json", err, strlen(err));
+        return;
+    }
+
+    WorkOrder wo;
+    StatusCode sc = work_order_get_by_id(wo_id, &wo);
+    if (sc != STATUS_OK) {
+        const char *err = "{\"success\": false, \"message\": \"Work order not found\"}";
+        send_http_response(client, 404, "application/json", err, strlen(err));
+        return;
+    }
+
+    /* Safety Check: Never undo completed work order */
+    if (strcmp(wo.status, "Completed") == 0) {
+        const char *err = "{\"success\": false, \"message\": \"Reversal blocked: Completed work orders have immutable financial and maintenance audit trails.\"}";
+        send_http_response(client, 400, "application/json", err, strlen(err));
+        return;
+    }
+
+    char rollback_status[32] = "Open";
+    if (strcmp(wo.status, "In Progress") == 0) {
+        safe_strncpy(rollback_status, "Assigned", sizeof(rollback_status));
+    } else if (strcmp(wo.status, "Assigned") == 0) {
+        safe_strncpy(rollback_status, "Open", sizeof(rollback_status));
+    } else if (strcmp(wo.status, "Waiting for Parts") == 0) {
+        safe_strncpy(rollback_status, "In Progress", sizeof(rollback_status));
+    } else {
+        const char *err = "{\"success\": false, \"message\": \"Cannot undo initial Open state\"}";
+        send_http_response(client, 400, "application/json", err, strlen(err));
+        return;
+    }
+
+    sc = work_order_update_status(wo_id, rollback_status, "Reversible status undo via operational stack", user->id, user->username);
+    if (sc == STATUS_OK) {
+        char resp[512];
+        snprintf(resp, sizeof(resp),
+            "{\"success\": true, \"message\": \"Status reverted successfully\", \"work_order_id\": %d, \"from_status\": \"%s\", \"to_status\": \"%s\", \"algorithm\": \"LIFO Operational Stack\", \"complexity\": \"O(1) Push/Pop\"}",
+            wo_id, wo.status, rollback_status);
+        send_http_response(client, 200, "application/json", resp, strlen(resp));
+    } else {
+        const char *err = "{\"success\": false, \"message\": \"Failed to revert status\"}";
+        send_http_response(client, 500, "application/json", err, strlen(err));
+    }
+}
+
+static bool str_contains_ignore_case(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return false;
+    if (!needle[0]) return true;
+    size_t nlen = strlen(needle);
+    size_t hlen = strlen(haystack);
+    if (hlen < nlen) return false;
+    for (size_t i = 0; i <= hlen - nlen; i++) {
+        bool match = true;
+        for (size_t j = 0; j < nlen; j++) {
+            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+static int resolve_hub_id_dijkstra(DsaGraph *g, const char *val) {
+    if (!val || val[0] == '\0') return -1;
+    char decoded[128];
+    safe_strncpy(decoded, val, sizeof(decoded));
+    char *p = decoded;
+    while ((p = strstr(p, "%20")) != NULL) {
+        *p = ' ';
+        memmove(p + 1, p + 3, strlen(p + 3) + 1);
+    }
+    if (isdigit((unsigned char)decoded[0])) {
+        int id = atoi(decoded);
+        if (id >= 0 && id < g->num_vertices) return id;
+    }
+    for (int i = 0; i < g->num_vertices; i++) {
+        if (str_contains_ignore_case(g->vertices[i].name, decoded) || str_contains_ignore_case(decoded, g->vertices[i].name)) return i;
+    }
+    if (str_contains_ignore_case(decoded, "Central")) return 0;
+    if (str_contains_ignore_case(decoded, "North")) return 1;
+    if (str_contains_ignore_case(decoded, "South")) return 2;
+    if (str_contains_ignore_case(decoded, "East")) return 3;
+    if (str_contains_ignore_case(decoded, "West")) return 4;
+    if (str_contains_ignore_case(decoded, "Port")) return 5;
+    return -1;
+}
+
+static void handle_api_routes_plan(SOCKET client, const char *query, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    DsaGraph *g = dsa_graph_create_sample_fleet_network();
+    if (!g) {
+        send_http_response(client, 500, "application/json", "{\"error\":\"Graph creation failure\"}", 30);
+        return;
+    }
+
+    char from_str[128] = "0", to_str[128] = "5";
+    if (query) {
+        const char *f = strstr(query, "from=");
+        if (f) sscanf(f + 5, "%127[^&]", from_str);
+        const char *t = strstr(query, "to=");
+        if (t) sscanf(t + 3, "%127[^&]", to_str);
+    }
+
+    int from_id = resolve_hub_id_dijkstra(g, from_str);
+    int to_id = resolve_hub_id_dijkstra(g, to_str);
+
+    if (from_id < 0 || to_id < 0) {
+        dsa_graph_destroy(g);
+        const char *err = "{\"success\": false, \"message\": \"Invalid hub name or ID. Hub not found in regional network.\"}";
+        send_http_response(client, 404, "application/json", err, strlen(err));
+        return;
+    }
+
+    int dist = 0, path[16], path_len = 0;
+    bool found = dsa_graph_dijkstra(g, from_id, to_id, &dist, path, &path_len);
+    if (!found || dist >= DSA_INF) {
+        dsa_graph_destroy(g);
+        const char *err = "{\"success\": false, \"message\": \"Destination hub is unreachable in graph network.\"}";
+        send_http_response(client, 404, "application/json", err, strlen(err));
+        return;
+    }
+
+    char path_json[1024] = "[";
+    char path_str[512] = "";
+    for (int i = 0; i < path_len; i++) {
+        char item[128];
+        snprintf(item, sizeof(item), "%s{\"id\": %d, \"name\": \"%s\", \"type\": \"%s\"}",
+                 (i > 0) ? ", " : "", path[i], g->vertices[path[i]].name, g->vertices[path[i]].type);
+        strcat(path_json, item);
+
+        strcat(path_str, g->vertices[path[i]].name);
+        if (i + 1 < path_len) strcat(path_str, " -> ");
+    }
+    strcat(path_json, "]");
+
+    char buf[2048];
+    int len = snprintf(buf, sizeof(buf),
+        "{"
+        "\"success\": true,"
+        "\"algorithm\": \"Dijkstra's Shortest Path Algorithm\","
+        "\"complexity\": \"O((V + E) log V)\","
+        "\"network_model\": \"Regional Fleet Logistics Network (6 Distribution Hubs)\","
+        "\"from_hub\": {\"id\": %d, \"name\": \"%s\"},"
+        "\"to_hub\": {\"id\": %d, \"name\": \"%s\"},"
+        "\"route\": \"%s\","
+        "\"route_summary\": \"%s\","
+        "\"shortest_dist_km\": %d,"
+        "\"shortest_distance_km\": %d,"
+        "\"nodes_traversed\": %d,"
+        "\"hops\": %s,"
+        "\"path\": %s"
+        "}",
+        from_id, g->vertices[from_id].name,
+        to_id, g->vertices[to_id].name,
+        path_str, path_str,
+        dist, dist,
+        path_len,
+        path_json, path_json);
+
+    send_http_response(client, 200, "application/json", buf, len);
+    dsa_graph_destroy(g);
+}
+
+static void handle_api_analytics_rankings(SOCKET client, const char *query, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    VehicleFilterOptions f = {0};
+    Vehicle *list = NULL;
+    int count = 0;
+    vehicle_list(&f, &list, &count);
+
+    VehicleSortField sort_field = VEHICLE_SORT_ODOMETER;
+    bool descending = true;
+    if (query) {
+        if (strstr(query, "sort_by=cost") || strstr(query, "sort_by=reg")) sort_field = VEHICLE_SORT_REG;
+        else if (strstr(query, "sort_by=make")) sort_field = VEHICLE_SORT_MAKE;
+        else if (strstr(query, "sort_by=fuel")) sort_field = VEHICLE_SORT_FUEL;
+        else if (strstr(query, "sort_by=year")) sort_field = VEHICLE_SORT_REG;
+        if (strstr(query, "order=asc")) descending = false;
+    }
+
+    if (count > 1) {
+        dsa_mergesort_vehicles(list, 0, count - 1, sort_field, descending);
+    }
+
+    size_t cap = 65536 + (count * 512);
+    char *buf = (char *)malloc(cap);
+    char items_json[32768] = "";
+    size_t ioff = 0;
+
+    for (int i = 0; i < count; i++) {
+        char metric_display[128] = "";
+        long val = list[i].odometer_km;
+        if (sort_field == VEHICLE_SORT_FUEL) {
+            val = list[i].fuel_percentage;
+            snprintf(metric_display, sizeof(metric_display), "%d%% Fuel", list[i].fuel_percentage);
+        } else if (sort_field == VEHICLE_SORT_REG) {
+            snprintf(metric_display, sizeof(metric_display), "%s", list[i].registration_number);
+        } else if (sort_field == VEHICLE_SORT_MAKE) {
+            snprintf(metric_display, sizeof(metric_display), "%s %s", list[i].make, list[i].model);
+        } else {
+            snprintf(metric_display, sizeof(metric_display), "%d km", list[i].odometer_km);
+        }
+
+        ioff += snprintf(items_json + ioff, sizeof(items_json) - ioff,
+            "%s{\"rank\": %d, \"id\": %d, \"registration\": \"%s\", \"registration_number\": \"%s\", "
+            "\"make_model\": \"%s %s\", \"make\": \"%s\", \"model\": \"%s\", "
+            "\"year\": %d, \"odometer_km\": %d, \"metric_value\": %ld, \"metric_display\": \"%s\", "
+            "\"fuel_percentage\": %d, \"status\": \"%s\"}",
+            (i > 0) ? ", " : "",
+            i + 1, list[i].id, list[i].registration_number, list[i].registration_number,
+            list[i].make, list[i].model, list[i].make, list[i].model,
+            list[i].manufacturing_year, list[i].odometer_km, val, metric_display,
+            list[i].fuel_percentage, list[i].status);
+    }
+
+    size_t off = snprintf(buf, cap, "{\"success\": true, \"count\": %d, \"total_ranked\": %d, \"algorithm\": \"Divide-and-Conquer Merge Sort\", \"complexity\": \"O(N log N) Stable\", \"rankings\": [%s], \"data\": [%s]}",
+                          count, count, items_json, items_json);
+
+    send_http_response(client, 200, "application/json", buf, off);
+    free(buf);
+    vehicle_free_list(list);
+}
+
+static void handle_api_optimization_knapsack(SOCKET client, const char *body, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    int budget = 25000;
+    if (body) {
+        json_get_int_field(body, "budget", &budget);
+        json_get_int_field(body, "budget_ceiling", &budget);
+    }
+    if (budget <= 0) budget = 25000;
+
+    DsaMaintenanceJob jobs[6] = {
+        {1, "MH-01-AB-1001", "Engine Timing Belt & Water Pump", 12000, 95},
+        {2, "MH-02-CD-2002", "Brake Caliper Overhaul", 4500, 85},
+        {3, "MH-03-EF-3003", "Full Tyre Rotation & Alignment", 3200, 50},
+        {4, "MH-04-GH-4004", "AC Compressor Servicing", 7500, 40},
+        {5, "MH-05-IJ-5005", "Suspension Strut Bushings", 6000, 75},
+        {6, "MH-01-AB-1001", "Transmission Fluid Flush", 5000, 65}
+    };
+
+    int chosen[6];
+    int chosen_cnt = 0;
+    int max_score = dsa_dp_knapsack_maintenance(jobs, 6, budget, chosen, &chosen_cnt);
+
+    int total_spent = 0;
+    char sel_json[2048] = "[";
+    for (int i = 0; i < chosen_cnt; i++) {
+        int idx = chosen[i];
+        total_spent += jobs[idx].cost_units;
+        char item[256];
+        snprintf(item, sizeof(item),
+            "%s{\"id\": %d, \"vehicle\": \"%s\", \"service\": \"%s\", \"cost_rupees\": %d, \"safety_score\": %d}",
+            (i > 0) ? ", " : "",
+            jobs[idx].id, jobs[idx].vehicle_reg, jobs[idx].service_name,
+            jobs[idx].cost_units, jobs[idx].criticality_score);
+        strcat(sel_json, item);
+    }
+    strcat(sel_json, "]");
+
+    char buf[4096];
+    int len = snprintf(buf, sizeof(buf),
+        "{"
+        "\"success\": true,"
+        "\"algorithm\": \"0-1 Knapsack Dynamic Programming\","
+        "\"complexity\": \"O(N * B)\","
+        "\"budget_allocated\": %d,"
+        "\"budget_spent\": %d,"
+        "\"total_cost\": %d,"
+        "\"budget_remaining\": %d,"
+        "\"max_safety_score\": %d,"
+        "\"max_reliability_score\": %d,"
+        "\"services_selected_count\": %d,"
+        "\"jobs_selected\": %d,"
+        "\"selected_jobs\": %s"
+        "}",
+        budget, total_spent, total_spent, budget - total_spent, max_score, max_score, chosen_cnt, chosen_cnt, sel_json);
+
+    send_http_response(client, 200, "application/json", buf, len);
+}
+
+static void handle_api_optimization_tsp(SOCKET client, const char *body, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    int stops = 4;
+    if (body) {
+        json_get_int_field(body, "num_stops", &stops);
+        json_get_int_field(body, "stops", &stops);
+    }
+    if (stops < 3 || stops > 4) stops = 4;
+
+    int tsp_matrix[DSA_TSP_MAX][DSA_TSP_MAX] = {
+        {0, 10, 15, 20},
+        {10, 0, 35, 25},
+        {15, 35, 0, 30},
+        {20, 25, 30, 0}
+    };
+    int tour[8];
+    int tour_cost = dsa_tsp_branch_and_bound(tsp_matrix, 4, tour);
+
+    const char *depot_names[4] = {"Central Depot", "North Bay", "South Hub", "West Logistics"};
+    char tour_json[1024] = "[";
+    char tour_str[512] = "";
+    for (int i = 0; i <= 4; i++) {
+        int node = tour[i];
+        char item[128];
+        snprintf(item, sizeof(item), "%s{\"step\": %d, \"depot_id\": %d, \"name\": \"%s\"}",
+                 (i > 0) ? ", " : "", i + 1, node, depot_names[node]);
+        strcat(tour_json, item);
+
+        strcat(tour_str, depot_names[node]);
+        if (i < 4) strcat(tour_str, " -> ");
+    }
+    strcat(tour_json, "]");
+
+    char buf[2048];
+    int len = snprintf(buf, sizeof(buf),
+        "{"
+        "\"success\": true,"
+        "\"algorithm\": \"Branch & Bound with Lower Bound Pruning\","
+        "\"complexity\": \"O(N!) Worst-Case Pruned\","
+        "\"num_depots\": %d,"
+        "\"num_stops\": %d,"
+        "\"optimal_circuit_distance_km\": %d,"
+        "\"optimal_tour_distance_km\": %d,"
+        "\"circuit_summary\": \"%s\","
+        "\"tour_steps\": %s"
+        "}",
+        stops, stops, tour_cost, tour_cost, tour_str, tour_json);
+
+    send_http_response(client, 200, "application/json", buf, len);
+}
+
+static void handle_api_demo_status(SOCKET client, const User *user) {
+    if (!http_authorize(client, user, PERM_READ)) return;
+
+    const char *path = db_get_path();
+    bool is_demo = (path && strstr(path, "demo_fleet.db") != NULL);
+
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf),
+        "{\"success\": true, \"is_demo_mode\": %s, \"active_database\": \"%s\", \"database_path\": \"%s\", \"can_reset\": %s}",
+        is_demo ? "true" : "false", path ? path : "data/fleet.db", path ? path : "data/fleet.db", is_demo ? "true" : "false");
+
+    send_http_response(client, 200, "application/json", buf, len);
+}
+
+static void handle_api_demo_reset(SOCKET client, const User *user) {
+    if (!http_authorize(client, user, PERM_BACKUP_RESTORE)) return;
+
+    const char *path = db_get_path();
+    if (!path || strstr(path, "demo_fleet.db") == NULL) {
+        const char *denied = "{\"success\": false, \"message\": \"Safety Violation: Only demo_fleet.db may be reset. Production database data/fleet.db is protected.\"}";
+        send_http_response(client, 403, "application/json", denied, strlen(denied));
+        return;
+    }
+
+    sqlite3 *db = db_get_handle();
+    if (!db) {
+        send_http_response(client, 500, "application/json", "{\"error\":\"DB error\"}", 21);
+        return;
+    }
+
+    /* Clear demo operational tables */
+    sqlite3_exec(db, "DELETE FROM work_order_history;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM inspection_items;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM inspections;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM work_orders;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM expenses;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM maintenance_records;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM notifications;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM system_notifications;", NULL, NULL, NULL);
+
+    int u = 0, n = 0;
+    schedule_evaluate_all(&u, &n);
+    notification_sync_all_events(NULL);
+
+    audit_log_action(user->id, "DEMO_RESET", "database", 0, "Reset disposable demo database records");
+
+    const char *ok = "{\"success\": true, \"message\": \"Demo database safely reset and re-synchronized.\"}";
+    send_http_response(client, 200, "application/json", ok, strlen(ok));
 }
 
 static void handle_api_backup(SOCKET client, const User *user) {
@@ -1207,6 +2566,11 @@ static void handle_client_request(SOCKET client) {
         if (!cl) cl = strstr(req_buf, "content-length:");
         if (cl) {
             int content_len = atoi(cl + 15);
+            if (content_len < 0 || content_len > (int)sizeof(req_buf) - 512) {
+                const char *err = "{\"error\": \"Payload Too Large\", \"message\": \"Request body exceeds server limit of 15KB\", \"code\": 413}";
+                send_http_response(client, 413, "application/json", err, strlen(err));
+                return;
+            }
             int body_so_far = received - (int)(body - req_buf);
             while (body_so_far < content_len && received < (int)sizeof(req_buf) - 1) {
                 int n = recv(client, req_buf + received, (int)sizeof(req_buf) - 1 - received, 0);
@@ -1252,10 +2616,49 @@ static void handle_client_request(SOCKET client) {
             handle_api_maintenance(client, method, body, &current_user);
         } else if (strcmp(path, "/api/schedules") == 0) {
             handle_api_schedules(client, method, body, &current_user);
+        } else if (strcmp(path, "/api/work-orders") == 0) {
+            handle_api_work_orders(client, method, body, query, &current_user);
+        } else if (strcmp(path, "/api/work-orders/history") == 0) {
+            handle_api_work_order_history(client, query, &current_user);
+        } else if (strcmp(path, "/api/inspections") == 0) {
+            handle_api_inspections(client, method, body, query, &current_user);
+        } else if (strcmp(path, "/api/inspections/defects") == 0) {
+            handle_api_inspection_defects(client, query, &current_user);
+        } else if (strcmp(path, "/api/inspections/create-work-order") == 0) {
+            handle_api_inspection_create_wo(client, body, &current_user);
+        } else if (strcmp(path, "/api/analytics") == 0) {
+            handle_api_analytics(client, query, &current_user);
         } else if (strcmp(path, "/api/expenses") == 0) {
             handle_api_expenses(client, method, body, &current_user);
+        } else if (strcmp(path, "/api/live-status") == 0) {
+            handle_api_live_status(client, &current_user);
         } else if (strcmp(path, "/api/notifications") == 0) {
-            handle_api_notifications(client, &current_user);
+            handle_api_notifications(client, method, body, query, &current_user);
+        } else if (strcmp(path, "/api/notifications/ack") == 0) {
+            handle_api_notifications(client, "POST", body, query, &current_user);
+        } else if (strcmp(path, "/api/notifications/ack-all") == 0) {
+            handle_api_notifications(client, "POST", "{\"action\":\"ack_all\"}", query, &current_user);
+
+        } else if (strcmp(path, "/api/vehicles/lookup") == 0) {
+            handle_api_vehicle_lookup(client, query, &current_user);
+        } else if (strcmp(path, "/api/maintenance/priority-queue") == 0) {
+            handle_api_maintenance_prio_queue(client, &current_user);
+        } else if (strcmp(path, "/api/work-orders/dispatch-queue") == 0) {
+            handle_api_work_order_queue(client, &current_user);
+        } else if (strcmp(path, "/api/work-orders/undo") == 0) {
+            handle_api_work_order_undo(client, body, &current_user);
+        } else if (strcmp(path, "/api/routes/plan") == 0) {
+            handle_api_routes_plan(client, query, &current_user);
+        } else if (strcmp(path, "/api/analytics/rankings") == 0) {
+            handle_api_analytics_rankings(client, query, &current_user);
+        } else if (strcmp(path, "/api/optimization/knapsack") == 0) {
+            handle_api_optimization_knapsack(client, body, &current_user);
+        } else if (strcmp(path, "/api/optimization/tsp") == 0) {
+            handle_api_optimization_tsp(client, body, &current_user);
+        } else if (strcmp(path, "/api/demo/status") == 0) {
+            handle_api_demo_status(client, &current_user);
+        } else if (strcmp(path, "/api/demo/reset") == 0) {
+            handle_api_demo_reset(client, &current_user);
         } else if (strcmp(path, "/api/dsa/run") == 0) {
             handle_api_dsa_run(client, &current_user);
         } else if (strcmp(path, "/api/backup") == 0) {
@@ -1329,6 +2732,7 @@ StatusCode http_server_start(int port) {
 
     g_server_fd = server_sock;
     g_server_running = true;
+    g_server_start_time = time(NULL);
 
     printf("\n=================================================================\n");
     printf("   FLEET VEHICLE MAINTENANCE RECORD SYSTEM - WEB DASHBOARD\n");

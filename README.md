@@ -85,11 +85,17 @@ An enterprise-grade Fleet Vehicle Maintenance & Operational Record System implem
 
 ```
 fleet vehicle maintenance record system/
-├── Makefile                          # Unified build system (all, test, web, dsa, seed, clean)
+├── Makefile                          # Unified build system (all, test, clean, check, format, format-check, help)
 ├── README.md                         # Documentation and operational manual
 ├── .gitignore                        # Git exclusion rules
+├── .clang-format                     # C11 code style configuration
+├── docs/                             # Engineering and architecture documentation
+│   ├── architecture.md               # Technical architecture and component design
+│   └── development.md                # Developer, operations, build, and troubleshooting guide
 ├── migrations/
-│   └── 001_initial_schema.sql        # Normalized SQLite schema migration
+│   ├── 001_initial_schema.sql        # Initial normalized SQLite schema migration
+│   ├── 002_smart_fleet_management.sql# Work orders, inspections, defect tracking schema
+│   └── 003_live_monitoring_and_dsa.sql# Persistent system notifications and event deduplication
 ├── include/
 │   ├── common.h                      # Shared types, constants, date & string utilities
 │   ├── database.h                    # Connection, transactions, and migration logic
@@ -99,8 +105,10 @@ fleet vehicle maintenance record system/
 │   ├── driver.h                      # Driver CRUD, search, unassign cascade, and delete
 │   ├── maintenance.h                 # Service records and vehicle history
 │   ├── schedule.h                    # Preventive maintenance scheduling & reminder evaluation
+│   ├── work_order.h                  # Smart work orders, assignment, and atomic completion
+│   ├── inspection.h                  # Digital vehicle inspection & defect escalation
 │   ├── expense.h                     # Cost tracking and financial aggregations
-│   ├── notification.h                # In-app persistent alert management
+│   ├── notification.h                # In-app persistent alert management & deduplication
 │   ├── audit.h                       # Security and operational audit logging
 │   ├── dashboard.h                   # Real-time SQL aggregations and KPIs
 │   ├── dsa.h                         # Pure C11 DSA definitions (9 structures & algorithms)
@@ -110,15 +118,17 @@ fleet vehicle maintenance record system/
 │   ├── backup.h                      # SQLite online backup and restore API
 │   └── ui.h                          # Interactive enterprise console interface
 ├── src/
-│   ├── main.c                        # Application entry point, CLI arguments (--web, --dsa)
+│   ├── main.c                        # Application entry point, CLI arguments (--web, --demo, --dsa)
 │   ├── common.c                      # Utility implementations
-│   ├── database.c                    # Database engine interface
+│   ├── database.c                    # Database engine interface & isolation
 │   ├── auth.c                        # OpenSSL cryptographic authentication & user API
 │   ├── input.c                       # Secure input parsing
 │   ├── vehicle.c                     # Vehicle business logic & relational delete
 │   ├── driver.c                      # Driver management logic & search
 │   ├── maintenance.c                 # Maintenance service record logic
 │   ├── schedule.c                    # Preventive maintenance & reminder evaluation
+│   ├── work_order.c                  # Work order lifecycle and atomic state transitions
+│   ├── inspection.c                  # 8-point digital inspection and defect creation
 │   ├── expense.c                     # Financial analytics logic
 │   ├── notification.c                # Notification deduplication engine
 │   ├── audit.c                       # Audit logging implementation
@@ -130,19 +140,20 @@ fleet vehicle maintenance record system/
 │   ├── reports_pdf.c                 # Executive PDF report builders
 │   ├── backup.c                      # SQLite hot backup and disaster recovery
 │   └── ui.c                          # Interactive enterprise console interface
-├── web/                              # Professional White/Grey Web UI
-│   ├── index.html                    # Semantic HTML5 layout and modal dialogs
-│   ├── dashboard.css                 # Clean white/grey palette, card styles, and animations
+├── web/                              # Professional Web UI
+│   ├── index.html                    # Semantic HTML5 layout, live monitoring, tabs, dialogs
+│   ├── dashboard.css                 # Clean CSS styling, responsive grid, status badges
 │   └── app.js                        # Vanilla ES6 client interacting with C REST APIs
 ├── tests/
-│   └── test_main.c                   # Automated test suite (150 test assertions)
+│   ├── test_main.c                   # C Unit test suite (199 test assertions)
+│   ├── test_rbac_live.py             # Live HTTP RBAC security test suite (81 assertions)
+│   ├── test_smart_fleet_e2e.py       # End-to-end workflow test suite (33 assertions)
+│   └── test_live_monitoring_dsa.py   # Live monitoring & operational DSA test suite (53 assertions)
 ├── data/
-│   ├── fleet.db                      # Production SQLite database (created on first launch)
+│   ├── fleet.db                      # Production SQLite database (never reset or overwritten)
+│   ├── demo_fleet.db                 # Isolated database for safe college demonstrations
 │   └── seed_sample_data.sql          # Sample development / demonstration dataset
-├── reports/                          # Directory for exported CSV and PDF reports
-│   ├── final_gap_audit.md            # Comprehensive repository gap audit
-│   ├── dsa_implementation_report.md  # Detailed DSA implementation & complexity analysis
-│   └── final_verification_report.md  # System verification and delivery report
+├── reports/                          # Audit, verification, and exported reports
 └── backups/                          # Timestamped hot backup storage
 ```
 
@@ -604,10 +615,67 @@ The automated test runner (`test_runner.exe`) executes 115 independent assertion
   [PASS] DSA DP Knapsack correctly optimizes fleet maintenance safety under budget
   [PASS] DSA Branch & Bound TSP finds optimal inspection circuit cost (80 km)
 
+=== 9. Running Smart Fleet Work Orders & Inspection Tests ===
+  [PASS] Created Work Order successfully
+  [PASS] Work Order auto-generated unique tracking number
+  [PASS] Fetched Work Order by ID
+  [PASS] Work Order joined vehicle registration number
+  [PASS] Reject invalid transition Open -> Completed
+  [PASS] Assigned technician to Work Order
+  [PASS] Work Order status advanced to 'Assigned'
+  [PASS] Assigned technician name updated
+  [PASS] Advanced Work Order to 'In Progress'
+  [PASS] Completed Work Order and created Maintenance Record
+  [PASS] Work Order status is 'Completed'
+  [PASS] Work Order attached linked Maintenance Record ID
+  [PASS] Prevent duplicate completion on already completed Work Order
+  [PASS] Work Order tracks full status transition history
+  [PASS] Created Digital Vehicle Inspection with 8 checklist items
+  [PASS] Inspection accurately counted 2 defects
+  [PASS] Critical defect correctly escalated overall status to 'Fail'
+  [PASS] Retrieved inspection details with all 8 checklist items
+  [PASS] Generated Repair Work Order directly from inspection defect
+  [PASS] Repair Work Order inherited Critical priority from inspection item
+  [PASS] Repair Work Order linked to originating inspection ID
+  [PASS] Query vehicle defects returned all recorded failure items
+
 =================================================================
- TEST RESULTS SUMMARY: 150 / 150 Tests Passed (100%)
+ TEST RESULTS SUMMARY: 199 / 199 Tests Passed (100%)
 =================================================================
 ```
+
+### Live HTTP Integration Test Suites
+- **Live RBAC Security Test (`tests/test_rbac_live.py`):** **81 / 81 Tests Passed (100%)**
+- **Smart Fleet End-to-End Workflow Test (`tests/test_smart_fleet_e2e.py`):** **33 / 33 Tests Passed (100%)**
+- **Live Monitoring & Operational DSA Suite (`tests/test_live_monitoring_dsa.py`):** **53 / 53 Tests Passed (100%)**
+- **Combined Automated Assertions across all 4 suites:** **366 / 366 Passed (100%)**
+
+---
+
+## College Demonstration Mode
+
+The system features an isolated, safe **Demonstration Mode** designed specifically for academic evaluation and live presentations:
+
+### Launch Commands:
+```cmd
+# Standard Production Mode (Uses data/fleet.db)
+fleet.exe --web 8080
+
+# Safe College Demonstration Mode (Uses isolated data/demo_fleet.db)
+fleet.exe --demo --web 8080
+```
+
+### Safety & Isolation Guarantees:
+1. **Production DB Protection:** When launched with `--demo`, all reads and writes route strictly to `data/demo_fleet.db`. The production database `data/fleet.db` is never reset or modified.
+2. **Path-Guarded Demo Reset:** The reset endpoint (`POST /api/demo/reset`) verifies `strstr(db_get_path(), "demo_fleet.db") != NULL`. Attempting to reset any non-demo database returns HTTP 403 Forbidden.
+3. **Pristine Bootstrap:** If `data/demo_fleet.db` does not exist or has an uninitialized schema, the server automatically bootstraps from `data/fleet.db` with sample commercial vehicles, schedules, and default user accounts.
+
+### Default Demonstration Credentials:
+| Role | Username | Password |
+|---|---|---|
+| **System Administrator** | `admin` | `Admin@123` |
+| **Fleet Manager** | `manager` | `Manager@123` |
+| **Maintenance Staff** | `staff` | `Staff@123` |
 
 ---
 
