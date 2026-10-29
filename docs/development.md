@@ -80,6 +80,14 @@ fleet.exe --dsa
 ```
 Executes memory benchmarks and verification for all 8 C11 data structures and algorithms.
 
+### 3.5 Headless Reminders Engine (Task Scheduler / Cron)
+```cmd
+fleet.exe --check-reminders
+```
+Evaluates all preventive maintenance milestones against calendar dates and vehicle odometers without launching a UI or server. Useful for automated OS background scheduling:
+- **Windows Task Scheduler**: Register a daily task invoking `fleet.exe --check-reminders` at 08:00 AM.
+- **Linux / cron**: `0 6 * * * /path/to/fleet --check-reminders --db /path/to/fleet.db >> /var/log/fleet_reminders.log 2>&1`
+
 ---
 
 ## 4. Test Suites & Verification

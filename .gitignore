@@ -6,7 +6,7 @@ fleet.exe
 test_runner
 test_runner.exe
 
-# Database files
+# Database files (preserve schemas and seed scripts)
 data/*.db
 data/*.db-journal
 data/*.db-wal
@@ -19,13 +19,27 @@ data/*.db-shm
 # Backups
 backups/*.db
 
-# Generated reports
+# Generated exports and runtime outputs
 reports/*.csv
 reports/*.pdf
+*.log
 
-# IDE and editor artifacts
+# Scratch and intermediate scripts
+scratch/
+
+# Compilation database (machine-specific)
+compile_commands.json
+
+# Local environment & secrets
+.env
+.env.*
+*.env
+
+# IDE and OS artifacts
 .vscode/
 .idea/
 .cache/
 *.swp
 *.patch
+Thumbs.db
+.DS_Store
