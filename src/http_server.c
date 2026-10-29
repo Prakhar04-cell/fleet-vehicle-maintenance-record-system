@@ -2025,7 +2025,7 @@ static void handle_api_analytics_rankings(SOCKET client, const char *query, cons
     size_t ioff = 0;
 
     for (int i = 0; i < count; i++) {
-        char metric_display[128] = "";
+        char metric_display[256] = "";
         long val = list[i].odometer_km;
         if (sort_field == VEHICLE_SORT_FUEL) {
             val = list[i].fuel_percentage;
